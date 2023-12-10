@@ -13,8 +13,9 @@ def to_dict(cursor,data):
 def create_user(username,password):
     feedback = ""
     cursor = conn.cursor()
+    role = "admin" if username in ["varg_vikernes"] else "user"
     try: 
-        command = "insert into users (username,password) values ('%s','%s')" % (username,password)
+        command = "insert into users (username,password,role) values ('%s','%s','%s')" % (username,password,role)
         cursor.execute(command)
         feedback = "new user created"
     except psycopg2.errors.UniqueViolation as e:
@@ -24,9 +25,10 @@ def create_user(username,password):
 
 
 
-def select_one_user(username):
+def select_one_user(username,pwd=False):
     cursor = conn.cursor()
-    command = "select user_id, username, password, created from users where username = '%s'" % username
+    pwd_parameter = "password," if pwd else ""
+    command = "select username, %s created from users where username = '%s'" % (pwd_parameter, username)
     cursor.execute(command)
     data = cursor.fetchone()
     try:
