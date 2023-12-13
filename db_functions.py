@@ -23,7 +23,12 @@ def create_user(username,password):
     conn.commit()
     return feedback
 
-
+def show_albums():
+    cursor = conn.cursor()
+    command = "select name, title, release_year  from albums join artists on artists.artist_id = albums.artist_id;"
+    cursor.excecute(command)
+    data = cursor.fetchall()
+    return data
 
 def select_one_user(username,pwd=False):
     cursor = conn.cursor()

@@ -21,6 +21,7 @@ fe_secret = "3abb39aa-8df8-481e-8479-b4d868f45b12"
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
+    print("hey")
     response = await call_next(request)
     same_site = "sec-fetch-site" in request.headers and request.headers["sec-fetch-site"] == "same-origin"
     has_headers =  "cookie" in request.headers
@@ -28,6 +29,28 @@ async def add_process_time_header(request: Request, call_next):
         return response
     else:
         return JSONResponse({"detail":"not authorized"},401) 
+
+@api.post("/sign-in")
+async def sign_in2(request:Request, response: Response):
+    print("hey")
+    detail, code, token = "signed in", 200, None
+    content = await request.json()
+    user =  db_functions.select_one_user(content["username"],pwd=True)
+    print(user)
+    if user == None:
+        detail, code = "cannot sign in", 401
+    else:
+        verified = pwd_context.verify(content["password"], user["password"])
+        if not verified: 
+            detail, code = "cannot sign in", 401
+        else:
+            now = datetime.utcnow()
+            expires = now + timedelta(minutes=180)
+            jwt_payload = {"sub":user["username"],"iat":now,"exp":expires,"created":str(user["created"])}
+            token = jwt.encode(jwt_payload,fe_secret)
+    return JSONResponse({"detail":detail,"token":token},code)  
+
+
 
 async def verify_token(authorization: Annotated[str, Header()]):
     token = authorization.split(" ")[1]
@@ -63,24 +86,6 @@ async def register(request:Request):
     code = 400 if "already exists" in detail else code
     return JSONResponse({"detail":detail},code) 
 
-@api.post("/sign-in")
-async def sign_in(request:Request, response: Response):
-    detail, code, token = "signed in", 200, None
-    content = await request.json()
-    user =  db_functions.select_one_user(content["username"],pwd=True)
-    print(user)
-    if user == None:
-        detail, code = "cannot sign in", 401
-    else:
-        verified = pwd_context.verify(content["password"], user["password"])
-        if not verified: 
-            detail, code = "cannot sign in", 401
-        else:
-            now = datetime.utcnow()
-            expires = now + timedelta(minutes=180)
-            jwt_payload = {"sub":user["username"],"iat":now,"exp":expires,"created":str(user["created"])}
-            token = jwt.encode(jwt_payload,fe_secret)
-    return JSONResponse({"detail":detail,"token":token},code)  
 
 
 
