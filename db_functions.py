@@ -1,4 +1,6 @@
+import json
 import psycopg2
+import psycopg2.extras
 from passlib.context import CryptContext
 
 conn=psycopg2.connect(database="blackmetal",
@@ -24,9 +26,9 @@ def create_user(username,password):
     return feedback
 
 def show_albums():
-    cursor = conn.cursor()
-    command = "select name, title, release_year  from albums join artists on artists.artist_id = albums.artist_id;"
-    cursor.excecute(command)
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    command = "select name, title, release_year, photo, stock, price::float from albums join artists on artists.artist_id = albums.artist_id;"
+    cursor.execute(command)
     data = cursor.fetchall()
     return data
 

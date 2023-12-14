@@ -30,8 +30,15 @@ async def add_process_time_header(request: Request, call_next):
     else:
         return JSONResponse({"detail":"not authorized"},401) 
 
+@api.get("/albums")
+async def get_albums():
+    albums = db_functions.show_albums()
+    print(albums[0])
+    return JSONResponse({"albums":albums},200) 
+
+
 @api.post("/sign-in")
-async def sign_in2(request:Request, response: Response):
+async def sign_in(request:Request, response: Response):
     print("hey")
     detail, code, token = "signed in", 200, None
     content = await request.json()
