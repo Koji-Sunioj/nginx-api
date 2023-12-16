@@ -25,9 +25,18 @@ def create_user(username,password):
     conn.commit()
     return feedback
 
-def show_albums():
+def show_albums(page,sort,direction,query):
+    search = ""
+    offset = (page - 1) * 8
+    dir_pointer = {"ascending":"asc","descending":"desc"}  
+    if query != None:
+        search = "where lower(name) like lower('%{0}%') or lower(title) like lower('%{0}%')".format(query)
+    
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    command = "select name, title, release_year, photo, stock, price::float from albums join artists on artists.artist_id = albums.artist_id;"
+    command = """select name, title, release_year, photo, stock,price::float
+            from albums join artists on artists.artist_id = albums.artist_id
+            %s order by %s %s limit 8 offset %s;""" % (search,sort,dir_pointer[direction],offset)
+
     cursor.execute(command)
     data = cursor.fetchall()
     return data

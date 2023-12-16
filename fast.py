@@ -20,8 +20,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 fe_secret = "3abb39aa-8df8-481e-8479-b4d868f45b12"
 
 @app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    print("hey")
+async def check_same_site_or_cookie(request: Request, call_next):
     response = await call_next(request)
     same_site = "sec-fetch-site" in request.headers and request.headers["sec-fetch-site"] == "same-origin"
     has_headers =  "cookie" in request.headers
@@ -31,9 +30,8 @@ async def add_process_time_header(request: Request, call_next):
         return JSONResponse({"detail":"not authorized"},401) 
 
 @api.get("/albums")
-async def get_albums():
-    albums = db_functions.show_albums()
-    print(albums[0])
+async def get_albums(request:Request,page:int=1,sort:str="name",direction:str="ascending",query:str=None):
+    albums = db_functions.show_albums(page,sort,direction,query)
     return JSONResponse({"albums":albums},200) 
 
 
@@ -43,7 +41,6 @@ async def sign_in(request:Request, response: Response):
     detail, code, token = "signed in", 200, None
     content = await request.json()
     user =  db_functions.select_one_user(content["username"],pwd=True)
-    print(user)
     if user == None:
         detail, code = "cannot sign in", 401
     else:
