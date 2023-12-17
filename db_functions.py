@@ -25,6 +25,17 @@ def create_user(username,password):
     conn.commit()
     return feedback
 
+
+def show_album(artist_name,album_name):
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    command = """select name, title, release_year, photo, stock,price::float
+        from albums join artists on artists.artist_id = albums.artist_id
+        where name = '%s' and title = '%s';""" % (artist_name,album_name)
+    cursor.execute(command)
+    data = cursor.fetchone()
+    conn.commit()
+    return data
+
 def show_albums(page,sort,direction,query):
     search = ""
     offset = (page - 1) * 8
@@ -50,14 +61,9 @@ def show_albums(page,sort,direction,query):
 
 
 def select_one_user(username,pwd=False):
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     pwd_parameter = "password," if pwd else ""
     command = "select username, %s created from users where username = '%s'" % (pwd_parameter, username)
     cursor.execute(command)
     data = cursor.fetchone()
-    try:
-        user = to_dict(cursor, data)
-    except:
-        user = None
-    conn.commit()
-    return user
+    return data

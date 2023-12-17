@@ -29,14 +29,19 @@ async def check_same_site_or_cookie(request: Request, call_next):
     else:
         return JSONResponse({"detail":"not authorized"},401) 
 
+@api.get("/albums/{artist_name}/{album_name}")
+async def get_album(artist_name,album_name):
+    album = db_functions.show_album(artist_name,album_name)
+    return JSONResponse({"album":album},200) 
+
 @api.get("/albums")
-async def get_albums(request:Request,page:int=1,sort:str="name",direction:str="ascending",query:str=None):
+async def get_albums(page:int=1,sort:str="name",direction:str="ascending",query:str=None):
     albums = db_functions.show_albums(page,sort,direction,query)
     return JSONResponse({"albums":albums["data"],"pages":albums["pages"]},200) 
 
 
 @api.post("/sign-in")
-async def sign_in(request:Request, response: Response):
+async def sign_in(request:Request):
     print("hey")
     detail, code, token = "signed in", 200, None
     content = await request.json()
