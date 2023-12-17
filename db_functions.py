@@ -30,7 +30,8 @@ def show_album(artist_name,album_name):
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     command = """select name, title, release_year, photo, stock,price::float
         from albums join artists on artists.artist_id = albums.artist_id
-        where name = '%s' and title = '%s';""" % (artist_name,album_name)
+        where name = '%s' and title = '%s';""" % (artist_name.replace("'","''"),album_name.replace("'","''"))
+    print(command)
     cursor.execute(command)
     data = cursor.fetchone()
     conn.commit()
