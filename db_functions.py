@@ -34,12 +34,20 @@ def show_albums(page,sort,direction,query):
     
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     command = """select name, title, release_year, photo, stock,price::float
-            from albums join artists on artists.artist_id = albums.artist_id
-            %s order by %s %s limit 8 offset %s;""" % (search,sort,dir_pointer[direction],offset)
-
+        from albums join artists on artists.artist_id = albums.artist_id
+        %s order by %s %s limit 8 offset %s;""" % (search,sort,dir_pointer[direction],offset)
+    page_command = """select ceil(count(album_id)::float / 8)::int as pages from albums
+        join artists on artists.artist_id = albums.artist_id %s;""" % search
+    
     cursor.execute(command)
     data = cursor.fetchall()
-    return data
+    
+    cursor.execute(page_command)
+    pages =  cursor.fetchone()["pages"]
+    
+    conn.commit()
+    return {"data":data,"pages":pages}
+
 
 def select_one_user(username,pwd=False):
     cursor = conn.cursor()
