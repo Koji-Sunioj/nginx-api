@@ -32,7 +32,7 @@ async def check_same_site_or_cookie(request: Request, call_next):
 @api.get("/albums/{artist_name}/{album_name}")
 async def get_album(artist_name,album_name):
     album = db_functions.show_album(artist_name,album_name)
-    return JSONResponse({"album":album},200) 
+    return JSONResponse({"album":album["data"],"songs":album["songs"]},200) 
 
 @api.get("/albums")
 async def get_albums(page:int=1,sort:str="name",direction:str="ascending",query:str=None):

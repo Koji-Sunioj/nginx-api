@@ -1,3 +1,4 @@
+import re
 import json
 import psycopg2
 import psycopg2.extras
@@ -27,15 +28,19 @@ def create_user(username,password):
 
 
 def show_album(artist_name,album_name):
+    artist_name, album_name = re.sub("\-", " ",artist_name).replace("'","''"), re.sub("\-", " ",album_name).replace("'","''")
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    command = """select name, title, release_year, photo, stock,price::float
+    command = """select albums.album_id, name, title, release_year, photo, stock,price::float
         from albums join artists on artists.artist_id = albums.artist_id
-        where name = '%s' and title = '%s';""" % (artist_name.replace("'","''"),album_name.replace("'","''"))
-    print(command)
+        where lower(name) = '%s' and lower(title) = '%s';""" % (artist_name,album_name)
     cursor.execute(command)
     data = cursor.fetchone()
+    songs_command = "select track, song, duration from songs where album_id=%s" % data["album_id"]
+    cursor.execute(songs_command)
+    songs = cursor.fetchall()
     conn.commit()
-    return data
+    data.pop("album_id")
+    return {"data":data,"songs":songs}
 
 def show_albums(page,sort,direction,query):
     search = ""
@@ -45,6 +50,7 @@ def show_albums(page,sort,direction,query):
         search = "where lower(name) like lower('%{0}%') or lower(title) like lower('%{0}%')".format(query)
     
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    
     command = """select name, title, release_year, photo, stock,price::float
         from albums join artists on artists.artist_id = albums.artist_id
         %s order by %s %s limit 8 offset %s;""" % (search,sort,dir_pointer[direction],offset)
@@ -53,10 +59,8 @@ def show_albums(page,sort,direction,query):
     
     cursor.execute(command)
     data = cursor.fetchall()
-    
     cursor.execute(page_command)
     pages =  cursor.fetchone()["pages"]
-    
     conn.commit()
     return {"data":data,"pages":pages}
 
