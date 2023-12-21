@@ -29,8 +29,18 @@ async def check_same_site_or_cookie(request: Request, call_next):
     else:
         return JSONResponse({"detail":"not authorized"},401) 
 
+@api.get("/artist/{artist_name}")
+async def get_artist(artist_name):
+    artist_name = re.sub("\-", " ",artist_name).replace("'","''")
+    albums = db_functions.show_albums(query=artist_name,focus="artist")
+    print(albums)
+    return JSONResponse({"albums":"asdasd"},200) 
+
+
 @api.get("/albums/{artist_name}/{album_name}")
 async def get_album(artist_name,album_name):
+    artist_name = re.sub("\-", " ",artist_name).replace("'","''")
+    album_name = re.sub("\-", " ",album_name).replace("'","''")
     album = db_functions.show_album(artist_name,album_name)
     return JSONResponse({"album":album["data"],"songs":album["songs"]},200) 
 

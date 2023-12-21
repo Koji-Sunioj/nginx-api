@@ -28,7 +28,6 @@ def create_user(username,password):
 
 
 def show_album(artist_name,album_name):
-    artist_name, album_name = re.sub("\-", " ",artist_name).replace("'","''"), re.sub("\-", " ",album_name).replace("'","''")
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     command = """select albums.album_id, name, title, release_year, photo, stock,price::float
         from albums join artists on artists.artist_id = albums.artist_id
@@ -42,27 +41,32 @@ def show_album(artist_name,album_name):
     data.pop("album_id")
     return {"data":data,"songs":songs}
 
-def show_albums(page,sort,direction,query):
-    search = ""
-    offset = (page - 1) * 8
-    dir_pointer = {"ascending":"asc","descending":"desc"}  
-    if query != None:
-        search = "where lower(name) like lower('%{0}%') or lower(title) like lower('%{0}%')".format(query)
-    
+def show_albums(page=1,sort="title",direction="ascending",query=None,focus="albums"):
+    search, paginate_string = "", ""
+    data = {}
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    
+
+    if focus == "albums":
+        offset = (page - 1) * 8
+        dir_pointer = {"ascending":"asc","descending":"desc"}
+        search = "where lower(name) like '%{0}%' or lower(title) like '%{0}%'".format(query) if query != None else ""
+        paginate_string = "order by %s %s limit 8 offset %s" % (sort,dir_pointer[direction],offset)
+        page_command = """select ceil(count(album_id)::float / 8)::int as pages from albums
+            join artists on artists.artist_id = albums.artist_id %s;""" % search
+        cursor.execute(page_command)
+        data["pages"] =  cursor.fetchone()["pages"]   
+        
+    elif focus == "artist":
+        search = "where lower(name) = '{0}'".format(query)
+
     command = """select name, title, release_year, photo, stock,price::float
         from albums join artists on artists.artist_id = albums.artist_id
-        %s order by %s %s limit 8 offset %s;""" % (search,sort,dir_pointer[direction],offset)
-    page_command = """select ceil(count(album_id)::float / 8)::int as pages from albums
-        join artists on artists.artist_id = albums.artist_id %s;""" % search
+        %s %s;""" % (search, paginate_string)
     
     cursor.execute(command)
-    data = cursor.fetchall()
-    cursor.execute(page_command)
-    pages =  cursor.fetchone()["pages"]
+    data["data"] = cursor.fetchall()
     conn.commit()
-    return {"data":data,"pages":pages}
+    return data
 
 
 def select_one_user(username,pwd=False):
