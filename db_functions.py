@@ -41,24 +41,33 @@ def show_album(artist_name,album_name):
     data.pop("album_id")
     return {"data":data,"songs":songs}
 
-def show_albums(page=1,sort="title",direction="ascending",query=None,focus="albums"):
+def show_artist(artist_name):
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    command = """select name,
+        json_agg(json_build_object('title',title,'name',name,'release_year',release_year,
+        'photo',photo,'stock',stock,'price',price::float)) as albums from albums 
+        join artists on artists.artist_id = albums.artist_id 
+        where lower(name) like '%{0}%' group by artists.artist_id;""".format(artist_name) 
+    cursor.execute(command) 
+    data = cursor.fetchall()
+    conn.commit()
+    return data[0]
+
+
+def show_albums(page=1,sort="title",direction="ascending",query=None):
     search, paginate_string = "", ""
     data = {}
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+         
+    search = "where lower(name) like '%{0}%' or lower(title) like '%{0}%'".format(query) if query != None else "" 
+    page_command = """select ceil(count(album_id)::float / 8)::int as pages from albums
+        join artists on artists.artist_id = albums.artist_id %s;""" % search
+    cursor.execute(page_command)
+    data["pages"] =  cursor.fetchone()["pages"]
 
-    if focus == "albums":
-        offset = (page - 1) * 8
-        dir_pointer = {"ascending":"asc","descending":"desc"}
-        search = "where lower(name) like '%{0}%' or lower(title) like '%{0}%'".format(query) if query != None else ""
-        paginate_string = "order by %s %s limit 8 offset %s" % (sort,dir_pointer[direction],offset)
-        page_command = """select ceil(count(album_id)::float / 8)::int as pages from albums
-            join artists on artists.artist_id = albums.artist_id %s;""" % search
-        cursor.execute(page_command)
-        data["pages"] =  cursor.fetchone()["pages"]   
-        
-    elif focus == "artist":
-        search = "where lower(name) = '{0}'".format(query)
-
+    offset = (page - 1) * 8
+    dir_pointer = {"ascending":"asc","descending":"desc"}
+    paginate_string = "order by %s %s limit 8 offset %s" % (sort,dir_pointer[direction],offset)
     command = """select name, title, release_year, photo, stock,price::float
         from albums join artists on artists.artist_id = albums.artist_id
         %s %s;""" % (search, paginate_string)
