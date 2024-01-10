@@ -43,7 +43,7 @@ def show_album(artist_name,album_name):
 
 def show_artist(artist_name):
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    command = """select name,
+    command = """select name,bio,
         json_agg(json_build_object('title',title,'name',name,'release_year',release_year,
         'photo',photo,'stock',stock,'price',price::float)) as albums from albums 
         join artists on artists.artist_id = albums.artist_id 
