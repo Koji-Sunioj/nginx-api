@@ -35,7 +35,6 @@ async def get_artist(artist_name):
     artist = db_functions.show_artist(artist_name)
     return JSONResponse({"artist":artist},200) 
 
-
 @api.get("/albums/{artist_name}/{album_name}")
 async def get_album(artist_name,album_name):
     artist_name = re.sub("\-", " ",artist_name).replace("'","''")
@@ -51,7 +50,6 @@ async def get_albums(page:int=1,sort:str="name",direction:str="ascending",query:
 
 @api.post("/sign-in")
 async def sign_in(request:Request):
-    print("hey")
     detail, code, token = "signed in", 200, None
     content = await request.json()
     user =  db_functions.select_one_user(content["username"],pwd=True)
@@ -68,12 +66,11 @@ async def sign_in(request:Request):
             token = jwt.encode(jwt_payload,fe_secret)
     return JSONResponse({"detail":detail,"token":token},code)  
 
-
-
-async def verify_token(authorization: Annotated[str, Header()]):
+async def verify_token(request:Request,authorization: Annotated[str, Header()]):
     token = authorization.split(" ")[1]
     try:
-        jwt.decode(token,key=fe_secret)
+        creds = jwt.decode(token,key=fe_secret)
+        request.state.sub = creds["sub"]
     except Exception as error:
         print(error)
         raise HTTPException(status_code=401, detail="invalid credentials")
@@ -89,9 +86,13 @@ async def check_token(request:Request, response: Response):
         response.status_code = 401
     return response
 
+@api.post("/cart/{album_id}",dependencies=[Depends(verify_token)])
+async def add_cart_item(request:Request, album_id,authorization: Annotated[Union[str, None], Header()] = None):
+    db_functions.add_cart_item(album_id, request.state.sub)
+    return JSONResponse({"hey":"asdasd"},200)
 
 @api.get("/users/{username}",dependencies=[Depends(verify_token)])
-async def get_user(username,authorization: Annotated[Union[str, None], Header()] = None):
+async def get_user(username):
     user =  db_functions.select_one_user(username)
     return JSONResponse({"user": jsonable_encoder(user) },200)
 
@@ -103,10 +104,6 @@ async def register(request:Request):
     detail = db_functions.create_user(content["username"],pwd_context.hash(content["password"]))
     code = 400 if "already exists" in detail else code
     return JSONResponse({"detail":detail},code) 
-
-
-
-
 
 app.include_router(api)
 app.include_router(auth)

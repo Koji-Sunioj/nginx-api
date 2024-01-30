@@ -27,6 +27,16 @@ def create_user(username,password):
     return feedback
 
 
+
+def add_cart_item(album_id, username):
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    user_cmd = "select user_id from users where username='%s';" % username
+    cursor.execute(user_cmd)
+    user_id = cursor.fetchone()["user_id"]
+    conn.commit()
+    print(user_id)
+
+
 def show_album(artist_name,album_name):
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     command = """select albums.album_id, name, title, release_year, photo, stock,price::float
@@ -38,7 +48,6 @@ def show_album(artist_name,album_name):
     cursor.execute(songs_command)
     songs = cursor.fetchall()
     conn.commit()
-    data.pop("album_id")
     return {"data":data,"songs":songs}
 
 def show_artist(artist_name):
