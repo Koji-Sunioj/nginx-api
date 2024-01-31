@@ -61,7 +61,7 @@ async def sign_in(request:Request):
             detail, code = "cannot sign in", 401
         else:
             now = datetime.utcnow()
-            expires = now + timedelta(minutes=180)
+            expires = now + timedelta(minutes=1)
             jwt_payload = {"sub":user["username"],"iat":now,"exp":expires,"created":str(user["created"])}
             token = jwt.encode(jwt_payload,fe_secret)
     return JSONResponse({"detail":detail,"token":token},code)  

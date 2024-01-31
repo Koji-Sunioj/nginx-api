@@ -37,9 +37,7 @@ def add_cart_item(album_id, username):
         
         cart_cmd ="select order_id from orders where user_id =%s and confirmed = 'no';" % user_id
         cursor.execute(cart_cmd)
-        existing_cart = cursor.fetchone()
-
-        decrement_stock_cmd = """update albums set stock = stock - 1 where album_id = %s""" % album_id
+        existing_cart = cursor.fetchone()  
         
         if existing_cart != None:
             order_id = existing_cart["order_id"]
@@ -52,8 +50,7 @@ def add_cart_item(album_id, username):
                 update_cmd = """update orders_bridge set quantity = quantity + 1
                     where order_id = %s and album_id = %s;""" % (order_id,album_id)
                 cursor.execute(update_cmd)          
-            
-            cursor.execute(decrement_stock_cmd)    
+              
         else:
             new_order_cmd = "insert into orders (user_id) values (%s) returning order_id;" % user_id
             cursor.execute(new_order_cmd)
@@ -62,8 +59,8 @@ def add_cart_item(album_id, username):
             insert_cmd = """insert into orders_bridge (order_id,album_id,quantity) values (%s,%s,1);""" % (order_id,album_id)
             cursor.execute(insert_cmd)
             
-            cursor.execute(decrement_stock_cmd)   
-        
+        decrement_stock_cmd = """update albums set stock = stock - 1 where album_id = %s""" % album_id 
+        cursor.execute(decrement_stock_cmd)   
         conn.commit()
     except Exception as error:
         print(error)
