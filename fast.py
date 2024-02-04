@@ -61,9 +61,10 @@ async def sign_in(request:Request):
             detail, code = "cannot sign in", 401
         else:
             now = datetime.utcnow()
-            expires = now + timedelta(minutes=1)
+            expires = now + timedelta(minutes=180)
             jwt_payload = {"sub":user["username"],"iat":now,"exp":expires,"created":str(user["created"])}
             token = jwt.encode(jwt_payload,fe_secret)
+
     return JSONResponse({"detail":detail,"token":token},code)  
 
 async def verify_token(request:Request,authorization: Annotated[str, Header()]):
@@ -86,10 +87,15 @@ async def check_token(request:Request, response: Response):
         response.status_code = 401
     return response
 
+@api.get("/orders/{username}",dependencies=[Depends(verify_token)])
+async def get_orders_cart(username):
+    orders_cart = db_functions.show_orders_cart(username)
+    return JSONResponse(orders_cart,200)
+
 @api.post("/cart/{album_id}",dependencies=[Depends(verify_token)])
 async def add_cart_item(request:Request, album_id,authorization: Annotated[Union[str, None], Header()] = None):
     db_functions.add_cart_item(album_id, request.state.sub)
-    return JSONResponse({"hey":"asdasd"},200)
+    return JSONResponse({"detail":"album added to cart"},200)
 
 @api.get("/users/{username}",dependencies=[Depends(verify_token)])
 async def get_user(username):

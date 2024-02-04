@@ -10,6 +10,29 @@ conn=psycopg2.connect(database="blackmetal",
                         password="18cba9cd-0776-4f09-9c0e-41d2937fab2b",
                         port=5432) 
 
+
+def show_orders_cart(username):
+    command = """select
+	    json_agg(orders) filter(where confirmed = 'yes') as orders,
+	    json_agg(orders) filter(where confirmed = 'no') as cart
+            from 
+	    (select users.username,users.created,orders.confirmed,
+		    json_build_object('order_id',orders.order_id,'confirmed',orders.confirmed,'dispatched',
+			orders.ordered,'balance',sum(orders_bridge.quantity * albums.price),'albums',
+				json_agg(json_build_object('album',albums.album_id,'title',albums.title,'artist',
+					artists.name,'quantity',orders_bridge.quantity,'photo',albums.photo,'price',albums.price))) as orders
+	    from orders 
+    		join orders_bridge on orders.order_id = orders_bridge.order_id
+	    	join albums on albums.album_id = orders_bridge.album_id
+		    join artists on artists.artist_id = albums.artist_id
+		    join users on users.user_id = orders.user_id
+	    where users.username = '%s' group by orders.order_id,users.username,users.created) 
+        order_values group by username,created;""" % username
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cursor.execute(command)
+    data = cursor.fetchone()
+    return data
+
 def to_dict(cursor,data):
     return {column.name:value for column,value in zip(list(cursor.description),list(data))}
 
@@ -121,7 +144,11 @@ def show_albums(page=1,sort="title",direction="ascending",query=None):
 def select_one_user(username,pwd=False):
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     pwd_parameter = "password," if pwd else ""
-    command = "select username, %s created from users where username = '%s'" % (pwd_parameter, username)
+    command = """select username, %s created, 
+        count(order_id) filter(where confirmed = 'yes') as orders,
+        count(order_id) filter(where confirmed = 'no') as cart  
+        from users  left join orders on orders.user_id = users.user_id 
+        where username = '%s' group by users.username,users.created""" % (pwd_parameter, username)
     cursor.execute(command)
     data = cursor.fetchone()
     return data
