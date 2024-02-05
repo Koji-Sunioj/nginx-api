@@ -17,15 +17,15 @@ def show_orders_cart(username):
 	    json_agg(orders) filter(where confirmed = 'no') as cart
             from 
 	    (select users.username,users.created,orders.confirmed,
-		    json_build_object('order_id',orders.order_id,'confirmed',orders.confirmed,'dispatched',
+		    json_build_object('order_id',orders.order_id,'dispatched',
 			orders.ordered,'balance',sum(orders_bridge.quantity * albums.price),'albums',
-				json_agg(json_build_object('album',albums.album_id,'title',albums.title,'artist',
-					artists.name,'quantity',orders_bridge.quantity,'photo',albums.photo,'price',albums.price))) as orders
-	    from orders 
-    		join orders_bridge on orders.order_id = orders_bridge.order_id
-	    	join albums on albums.album_id = orders_bridge.album_id
-		    join artists on artists.artist_id = albums.artist_id
-		    join users on users.user_id = orders.user_id
+				json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
+					artists.name,'quantity',orders_bridge.quantity,'price',albums.price))) as orders
+	    from users 
+            left join orders on users.user_id = orders.user_id
+            left join orders_bridge on orders.order_id = orders_bridge.order_id
+            left join albums on albums.album_id = orders_bridge.album_id
+            left join artists on artists.artist_id = albums.artist_id 
 	    where users.username = '%s' group by orders.order_id,users.username,users.created) 
         order_values group by username,created;""" % username
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -148,7 +148,7 @@ def select_one_user(username,pwd=False):
         count(order_id) filter(where confirmed = 'yes') as orders,
         count(order_id) filter(where confirmed = 'no') as cart  
         from users  left join orders on orders.user_id = users.user_id 
-        where username = '%s' group by users.username,users.created""" % (pwd_parameter, username)
+        where username = '%s' group by users.username,%s users.created""" % (pwd_parameter, username, pwd_parameter)
     cursor.execute(command)
     data = cursor.fetchone()
     return data
