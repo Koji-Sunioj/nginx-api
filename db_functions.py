@@ -17,7 +17,7 @@ def show_orders_cart(username):
 	    json_agg(orders) filter(where confirmed = 'no') as cart
             from 
 	    (select users.username,users.created,orders.confirmed,
-		    json_build_object('order_id',orders.order_id,'dispatched',
+		    json_build_object('order id',orders.order_id,'dispatched',
 			orders.ordered,'balance',sum(orders_bridge.quantity * albums.price),'albums',
 				json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
 					artists.name,'quantity',orders_bridge.quantity,'price',albums.price))) as orders
@@ -93,16 +93,17 @@ def add_cart_item(album_id, username):
 
 def show_album(artist_name,album_name):
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    command = """select albums.album_id, name, title, release_year, photo, stock,price::float
-        from albums join artists on artists.artist_id = albums.artist_id
-        where lower(name) = '%s' and lower(title) = '%s';""" % (artist_name,album_name)
+    command = "select json_build_object('album_id',albums.album_id,'name', name,'title', title, 'release_year',\
+        release_year,'photo', photo,'stock', stock,'price',price::float) as album,\
+        json_agg(json_build_object('track',track,'song',song,'duration',duration))  as songs\
+        from albums join artists on artists.artist_id = albums.artist_id\
+	    join songs on songs.album_id = albums.album_id where\
+	    lower(name) = '%s' and lower(title) = '%s' group by albums.album_id,name;" % (artist_name,album_name)
+    print(command)
     cursor.execute(command)
     data = cursor.fetchone()
-    songs_command = "select track, song, duration from songs where album_id=%s" % data["album_id"]
-    cursor.execute(songs_command)
-    songs = cursor.fetchall()
     conn.commit()
-    return {"data":data,"songs":songs}
+    return data
 
 def show_artist(artist_name):
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -152,3 +153,33 @@ def select_one_user(username,pwd=False):
     cursor.execute(command)
     data = cursor.fetchone()
     return data
+
+"""
+    select 
+	albums.album_id, name, title, release_year, photo, stock,price::float,sum(quantity) as cart
+from albums 
+	join artists on artists.artist_id = albums.artist_id
+	left join orders_bridge on orders_bridge.album_id = albums.album_id
+	left join orders on orders.order_id = orders_bridge.order_id
+	left join users on users.user_id = orders.user_id
+where 
+	lower(name) = 'deus mortem' and lower(title) = 'emanations of the black light' 
+	and users.username = 'varg_vikernes' and orders.confirmed = 'no'
+group by albums.album_id,name;"""
+
+
+"""select 
+	json_build_object('album_id',albums.album_id,'name', name,'title', title, 'release_year', 
+		release_year,'photo', photo,'stock', stock,'price',price::float) as album,
+	json_agg(json_build_object('track',track,'song',song,'duration',duration))  as songs
+		,orders_bridge.quantity as cart
+from albums 
+	join artists on artists.artist_id = albums.artist_id
+	join songs on songs.album_id = albums.album_id
+	left join orders_bridge on orders_bridge.album_id = albums.album_id
+	left join orders on orders.order_id = orders_bridge.order_id
+	left join users on users.user_id = orders.user_id
+where 
+	lower(name) = 'deus mortem' and lower(title) = 'emanations of the black light' 
+	and users.username = 'varg_vikernes' and orders.confirmed = 'no'
+group by albums.album_id,name,orders_bridge.quantity;"""
