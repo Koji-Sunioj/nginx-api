@@ -1,3 +1,75 @@
+create database blackmetal;
+
+\c blackmetal
+
+create table artists (
+    artist_id serial primary key,
+    name varchar unique,
+    bio varchar
+);
+
+alter sequence artists_artist_id_seq restart with 100;
+
+create table albums(
+    album_id serial primary key,
+    title varchar,
+    release_year smallint,
+    stock smallint check (stock >= 0),
+    price decimal(4,2),
+    photo varchar,
+    artist_id smallint,
+    foreign key (artist_id) references artists (artist_id)
+);
+
+alter table albums add constraint no_negative_stock check (stock >= 0);
+
+alter sequence albums_album_id_seq restart with 1000;
+
+create table users(
+    user_id serial primary key,
+    role varchar check (role in ('user','admin'));
+    username varchar unique,
+    password varchar not null,
+    created TIMESTAMP DEFAULT NOW()
+);
+
+create table songs(
+    track smallint,
+    album_id smallint,
+    duration smallint,
+    song varchar,
+    primary key(track, album_id),
+    foreign key (album_id) references albums(album_id)
+);
+
+
+create table orders(
+    order_id serial primary key,
+    user_id smallint,
+    confirmed varchar(3) default 'no',
+    ordered timestamp,
+    foreign key (user_id) references users(user_id)
+);
+
+alter sequence orders_order_id_seq restart with 10000;
+
+create table orders_bridge(
+    order_id int,
+    album_id smallint,
+    quantity smallint,
+    primary key(order_id, album_id),
+    foreign key (order_id) references orders (order_id)
+);
+
+
+revoke all on schema public from public;
+CREATE role bm_admin LOGIN PASSWORD '18cba9cd-0776-4f09-9c0e-41d2937fab2b';
+GRANT CONNECT ON database blackmetal TO bm_admin;
+GRANT USAGE on schema public to bm_admin;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO bm_admin;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bm_admin;
+
+
 insert into artists (artist_id, name, bio) values
 (100,'Ascension','Black metal band from Tornau vor der Heide, Saxony-Anhalt, Germany.'),
 (101,'The Black','Black metal band from Sweden.
@@ -237,3 +309,26 @@ insert into songs (track,album_id,duration,song) values
 (5,1021,708.0,'Veles Scrolls'),
 (6,1021,430.0,'Kolyada'),
 (7,1021,232.0,'Eternal Circle');
+
+CREATE OR REPLACE FUNCTION get_orders(api_username varchar) RETURNS  table (
+		orders json,
+		cart json
+	) 
+AS $$
+select
+	    json_agg(orders) filter(where confirmed = 'yes') as orders,
+	    json_agg(orders) filter(where confirmed = 'no') as cart
+            from 
+	    (select users.username,users.created,orders.confirmed,
+		    json_build_object('order id',orders.order_id,'dispatched',
+			orders.ordered,'balance',sum(orders_bridge.quantity * albums.price),'albums',
+				json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
+					artists.name,'quantity',orders_bridge.quantity,'price',albums.price))) as orders
+	    from users 
+            left join orders on users.user_id = orders.user_id
+            left join orders_bridge on orders.order_id = orders_bridge.order_id
+            left join albums on albums.album_id = orders_bridge.album_id
+            left join artists on artists.artist_id = albums.artist_id 
+	    where users.username = api_username group by orders.order_id,users.username,users.created) 
+        order_values group by username,created;
+$$ LANGUAGE sql;

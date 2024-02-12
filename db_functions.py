@@ -12,24 +12,8 @@ conn=psycopg2.connect(database="blackmetal",
 
 
 def show_orders_cart(username):
-    command = """select
-	    json_agg(orders) filter(where confirmed = 'yes') as orders,
-	    json_agg(orders) filter(where confirmed = 'no') as cart
-            from 
-	    (select users.username,users.created,orders.confirmed,
-		    json_build_object('order id',orders.order_id,'dispatched',
-			orders.ordered,'balance',sum(orders_bridge.quantity * albums.price),'albums',
-				json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
-					artists.name,'quantity',orders_bridge.quantity,'price',albums.price))) as orders
-	    from users 
-            left join orders on users.user_id = orders.user_id
-            left join orders_bridge on orders.order_id = orders_bridge.order_id
-            left join albums on albums.album_id = orders_bridge.album_id
-            left join artists on artists.artist_id = albums.artist_id 
-	    where users.username = '%s' group by orders.order_id,users.username,users.created) 
-        order_values group by username,created;""" % username
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cursor.execute(command)
+    cursor.callproc('get_orders', (username,))
     data = cursor.fetchone()
     return data
 
@@ -93,12 +77,13 @@ def add_cart_item(album_id, username):
 
 def show_album(artist_name,album_name):
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    command = "select json_build_object('album_id',albums.album_id,'name', name,'title', title, 'release_year',\
-        release_year,'photo', photo,'stock', stock,'price',price::float) as album,\
-        json_agg(json_build_object('track',track,'song',song,'duration',duration))  as songs\
-        from albums join artists on artists.artist_id = albums.artist_id\
-	    join songs on songs.album_id = albums.album_id where\
-	    lower(name) = '%s' and lower(title) = '%s' group by albums.album_id,name;" % (artist_name,album_name)
+    command = """
+    select json_build_object('album_id',albums.album_id,'name', name,'title', title, 'release_year',
+        release_year,'photo', photo,'stock', stock,'price',price::float) as album,
+        json_agg(json_build_object('track',track,'song',song,'duration',duration))  as songs
+        from albums join artists on artists.artist_id = albums.artist_id
+	    join songs on songs.album_id = albums.album_id where
+	    lower(name) = '%s' and lower(title) = '%s' group by albums.album_id,name;""" % (artist_name,album_name)
     print(command)
     cursor.execute(command)
     data = cursor.fetchone()
