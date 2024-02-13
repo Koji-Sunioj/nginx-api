@@ -27,7 +27,7 @@ alter sequence albums_album_id_seq restart with 1000;
 
 create table users(
     user_id serial primary key,
-    role varchar check (role in ('user','admin'));
+    role varchar check (role in ('user','admin')),
     username varchar unique,
     password varchar not null,
     created TIMESTAMP DEFAULT NOW()
@@ -68,7 +68,6 @@ GRANT CONNECT ON database blackmetal TO bm_admin;
 GRANT USAGE on schema public to bm_admin;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO bm_admin;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bm_admin;
-
 
 insert into artists (artist_id, name, bio) values
 (100,'Ascension','Black metal band from Tornau vor der Heide, Saxony-Anhalt, Germany.'),

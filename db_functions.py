@@ -84,7 +84,6 @@ def show_album(artist_name,album_name):
         from albums join artists on artists.artist_id = albums.artist_id
 	    join songs on songs.album_id = albums.album_id where
 	    lower(name) = '%s' and lower(title) = '%s' group by albums.album_id,name;""" % (artist_name,album_name)
-    print(command)
     cursor.execute(command)
     data = cursor.fetchone()
     conn.commit()
@@ -138,33 +137,3 @@ def select_one_user(username,pwd=False):
     cursor.execute(command)
     data = cursor.fetchone()
     return data
-
-"""
-    select 
-	albums.album_id, name, title, release_year, photo, stock,price::float,sum(quantity) as cart
-from albums 
-	join artists on artists.artist_id = albums.artist_id
-	left join orders_bridge on orders_bridge.album_id = albums.album_id
-	left join orders on orders.order_id = orders_bridge.order_id
-	left join users on users.user_id = orders.user_id
-where 
-	lower(name) = 'deus mortem' and lower(title) = 'emanations of the black light' 
-	and users.username = 'varg_vikernes' and orders.confirmed = 'no'
-group by albums.album_id,name;"""
-
-
-"""select 
-	json_build_object('album_id',albums.album_id,'name', name,'title', title, 'release_year', 
-		release_year,'photo', photo,'stock', stock,'price',price::float) as album,
-	json_agg(json_build_object('track',track,'song',song,'duration',duration))  as songs
-		,orders_bridge.quantity as cart
-from albums 
-	join artists on artists.artist_id = albums.artist_id
-	join songs on songs.album_id = albums.album_id
-	left join orders_bridge on orders_bridge.album_id = albums.album_id
-	left join orders on orders.order_id = orders_bridge.order_id
-	left join users on users.user_id = orders.user_id
-where 
-	lower(name) = 'deus mortem' and lower(title) = 'emanations of the black light' 
-	and users.username = 'varg_vikernes' and orders.confirmed = 'no'
-group by albums.album_id,name,orders_bridge.quantity;"""
