@@ -20,12 +20,11 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 fe_secret = "3abb39aa-8df8-481e-8479-b4d868f45b12"
 
 async def verify_token(request:Request,authorization: Annotated[str, Header()]):
-    token = authorization.split(" ")[1]
     try:
+        token = authorization.split(" ")[1]
         creds = jwt.decode(token,key=fe_secret)
         request.state.sub = creds["sub"]
     except Exception as error:
-        print(error)
         raise HTTPException(status_code=401, detail="invalid credentials")
 
 @app.middleware("http")
@@ -45,11 +44,14 @@ async def get_artist(artist_name):
     return JSONResponse({"artist":artist},200) 
 
 @api.get("/albums/{artist_name}/{album_name}")
-async def get_album(artist_name,album_name,authorization: Annotated[Union[str, None], Header()] = None):
-    print(authorization)
+async def get_album(artist_name,album_name,request:Request,authorization: Annotated[Union[str, None], Header()] = None):
+    username = None
+    if authorization: 
+       await verify_token(request,authorization)
+       username = request["state"]["sub"]
     artist_name = re.sub("\-", " ",artist_name).replace("'","''")
     album_name = re.sub("\-", " ",album_name).replace("'","''")
-    album = db_functions.show_album(artist_name,album_name)
+    album = db_functions.show_album(artist_name,album_name,username)
     return JSONResponse(album,200) 
 
 @api.get("/albums")
@@ -96,8 +98,8 @@ async def get_orders_cart(username):
 
 @api.post("/cart/{album_id}",dependencies=[Depends(verify_token)])
 async def add_cart_item(request:Request, album_id,authorization: Annotated[Union[str, None], Header()] = None):
-    db_functions.add_cart_item(album_id, request.state.sub)
-    return JSONResponse({"detail":"album added to cart"},200)
+    remaining = db_functions.add_cart_item(album_id, request["state"]["sub"])
+    return JSONResponse(remaining,200)
 
 @api.get("/users/{username}",dependencies=[Depends(verify_token)])
 async def get_user(username):

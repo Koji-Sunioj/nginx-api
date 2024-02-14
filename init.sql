@@ -315,8 +315,8 @@ CREATE OR REPLACE FUNCTION get_orders(api_username varchar) RETURNS  table (
 	) 
 AS $$
 select
-	    json_agg(orders) filter(where confirmed = 'yes') as orders,
-	    json_agg(orders) filter(where confirmed = 'no') as cart
+	    coalesce(json_agg(orders) filter (where confirmed = 'yes'),'[]') as orders,
+	    coalesce(json_agg(orders) filter (where confirmed = 'no'),'[]') as cart
             from 
 	    (select users.username,users.created,orders.confirmed,
 		    json_build_object('order id',orders.order_id,'dispatched',

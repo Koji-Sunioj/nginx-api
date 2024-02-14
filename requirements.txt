@@ -1,0 +1,5 @@
+fastapi==0.109.2
+passlib==1.7.4
+psycopg2_binary==2.9.9
+python_jose==3.3.0
+typing_extensions==3.10.0.2

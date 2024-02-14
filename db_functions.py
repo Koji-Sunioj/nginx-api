@@ -10,9 +10,9 @@ conn=psycopg2.connect(database="blackmetal",
                         password="18cba9cd-0776-4f09-9c0e-41d2937fab2b",
                         port=5432) 
 
+cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
 def show_orders_cart(username):
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cursor.callproc('get_orders', (username,))
     data = cursor.fetchone()
     return data
@@ -37,7 +37,6 @@ def create_user(username,password):
 
 def add_cart_item(album_id, username):
     try:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         user_cmd = "select user_id from users where username='%s';" % username
         cursor.execute(user_cmd)
         user_id = cursor.fetchone()["user_id"]
@@ -66,17 +65,28 @@ def add_cart_item(album_id, username):
             insert_cmd = """insert into orders_bridge (order_id,album_id,quantity) values (%s,%s,1);""" % (order_id,album_id)
             cursor.execute(insert_cmd)
             
-        decrement_stock_cmd = """update albums set stock = stock - 1 where album_id = %s""" % album_id 
-        cursor.execute(decrement_stock_cmd)   
+        decrement_stock_cmd = """update albums set stock = stock - 1 where album_id = %s returning stock as remaining""" % album_id 
+        cursor.execute(decrement_stock_cmd)
+        remaining = cursor.fetchone()   
         conn.commit()
+        return remaining
     except Exception as error:
         print(error)
         conn.rollback()
 
+def get_cart_count(username,album_id):
+    command = """
+    select coalesce(sum(quantity),0) as cart
+        from orders_bridge
+        join orders on orders_bridge.order_id = orders.order_id
+        join users on users.user_id = orders.user_id
+        where users.username = '%s' and orders_bridge.album_id = %s;""" % (username,album_id)
+    cursor.execute(command)
+    data = cursor.fetchone()
+    return data
 
 
-def show_album(artist_name,album_name):
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+def show_album(artist_name,album_name,username):  
     command = """
     select json_build_object('album_id',albums.album_id,'name', name,'title', title, 'release_year',
         release_year,'photo', photo,'stock', stock,'price',price::float) as album,
@@ -84,15 +94,20 @@ def show_album(artist_name,album_name):
         from albums join artists on artists.artist_id = albums.artist_id
 	    join songs on songs.album_id = albums.album_id where
 	    lower(name) = '%s' and lower(title) = '%s' group by albums.album_id,name;""" % (artist_name,album_name)
+     
     cursor.execute(command)
     data = cursor.fetchone()
+
+    if username:
+        cart = get_cart_count(username,data["album"]["album_id"])
+        data.update(cart)
+
     conn.commit()
     return data
 
 def show_artist(artist_name):
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    command = """select name,bio,
-        json_agg(json_build_object('title',title,'name',name,'release_year',release_year,
+    command = """
+    select name, bio, json_agg(json_build_object('title',title,'name',name,'release_year',release_year,
         'photo',photo,'stock',stock,'price',price::float)) as albums from albums 
         join artists on artists.artist_id = albums.artist_id 
         where lower(name) like '%{0}%' group by artists.artist_id;""".format(artist_name) 
@@ -103,10 +118,7 @@ def show_artist(artist_name):
 
 
 def show_albums(page=1,sort="title",direction="ascending",query=None):
-    search, paginate_string = "", ""
-    data = {}
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-         
+    search, paginate_string, data = "", "", {}
     search = "where lower(name) like '%{0}%' or lower(title) like '%{0}%'".format(query) if query != None else "" 
     page_command = """select ceil(count(album_id)::float / 8)::int as pages from albums
         join artists on artists.artist_id = albums.artist_id %s;""" % search
@@ -127,7 +139,6 @@ def show_albums(page=1,sort="title",direction="ascending",query=None):
 
 
 def select_one_user(username,pwd=False):
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     pwd_parameter = "password," if pwd else ""
     command = """select username, %s created, 
         count(order_id) filter(where confirmed = 'yes') as orders,
