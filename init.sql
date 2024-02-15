@@ -58,7 +58,7 @@ create table orders_bridge(
     album_id smallint,
     quantity smallint,
     primary key(order_id, album_id),
-    foreign key (order_id) references orders (order_id)
+    foreign key (order_id) references orders (order_id) on delete cascade
 );
 
 

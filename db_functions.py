@@ -34,19 +34,60 @@ def create_user(username,password):
     return feedback
 
 
+def remove_cart_item(album_id, username):
+    try:
+        owner = get_cart_owner(username)
+        user_id, order_id = owner["user_id"],owner["order_id"]
+        update_cmd = """with orders_sub as 
+            (update orders_bridge set quantity = quantity - 1 
+            where order_id = %s and album_id = %s returning order_id,
+            album_id,quantity)
+            update albums set stock = stock + 1
+            from orders_sub
+            where (albums.album_id) IN (select album_id from orders_sub) 
+            returning quantity as cart, stock as remaining;""" % (order_id,album_id)
+        cursor.execute(update_cmd)
+        results = cursor.fetchone()
+        if results["cart"] == 0:
+            remaining_cmd = """select sum(quantity) as quantity from orders 
+                join orders_bridge on orders.order_id = orders_bridge.order_id 
+                where confirmed = 'no' and user_id = %s;""" % user_id
+            cursor.execute(remaining_cmd)
+            quantity = cursor.fetchone()["quantity"]
+            if quantity == 0:
+                remove_cmd = """delete from orders where order_id = %s;""" % order_id
+            else:
+                remove_cmd = """ delete from orders_bridge where order_id = %s 
+                    and album_id = %s;""" % (order_id,album_id)
+                
+            cursor.execute(remove_cmd)
+        conn.commit()
+        return results
+    except Exception as error:
+        print(error)
+        conn.rollback()
+    
+
+
+def get_cart_owner(username):
+    user_cmd = "select user_id from users where username='%s';" % username
+    cursor.execute(user_cmd)
+    user_id = cursor.fetchone()["user_id"]
+
+    cart_cmd ="select order_id from orders where user_id =%s and confirmed = 'no';" % user_id
+    cursor.execute(cart_cmd)
+    cart = cursor.fetchone()
+    order_id = cart["order_id"] if cart is not None else None
+
+    return {"user_id":user_id,"order_id":order_id}
+
 
 def add_cart_item(album_id, username):
     try:
-        user_cmd = "select user_id from users where username='%s';" % username
-        cursor.execute(user_cmd)
-        user_id = cursor.fetchone()["user_id"]
-        
-        cart_cmd ="select order_id from orders where user_id =%s and confirmed = 'no';" % user_id
-        cursor.execute(cart_cmd)
-        existing_cart = cursor.fetchone()  
-        
-        if existing_cart != None:
-            order_id = existing_cart["order_id"]
+        owner = get_cart_owner(username)
+        user_id, order_id = owner["user_id"],owner["order_id"]
+  
+        if order_id != None:
             insert_cmd ="""insert into orders_bridge (order_id,album_id,quantity)
                 select %s, %s, 1 where not exists (select order_id from orders_bridge 
                 where order_id = %s and album_id = %s);""" % (order_id,album_id,order_id,album_id)
@@ -64,8 +105,14 @@ def add_cart_item(album_id, username):
             
             insert_cmd = """insert into orders_bridge (order_id,album_id,quantity) values (%s,%s,1);""" % (order_id,album_id)
             cursor.execute(insert_cmd)
-            
-        decrement_stock_cmd = """update albums set stock = stock - 1 where album_id = %s returning stock as remaining""" % album_id 
+
+        decrement_stock_cmd = """
+            update albums set stock = albums.stock - 1 from 
+            (select albums.album_id,albums.stock,orders_bridge.quantity 
+                from orders_bridge join albums on albums.album_id = orders_bridge.album_id 
+                where order_id = %s and albums.album_id = %s) as sub 
+            where sub.album_id = albums.album_id returning albums.stock as remaining, sub.quantity as cart
+            """ % (order_id,album_id) 
         cursor.execute(decrement_stock_cmd)
         remaining = cursor.fetchone()   
         conn.commit()
@@ -148,3 +195,7 @@ def select_one_user(username,pwd=False):
     cursor.execute(command)
     data = cursor.fetchone()
     return data
+
+
+#update albums set stock = stock - 1 from orders_bridge where albums.album_id = %s and orders_bridge.order_id = %s 
+#returning stock as remaining, quantity as cart

@@ -96,10 +96,15 @@ async def get_orders_cart(username):
     orders_cart = db_functions.show_orders_cart(username)
     return JSONResponse(orders_cart,200)
 
-@api.post("/cart/{album_id}",dependencies=[Depends(verify_token)])
+@api.post("/cart/{album_id}/add",dependencies=[Depends(verify_token)])
 async def add_cart_item(request:Request, album_id,authorization: Annotated[Union[str, None], Header()] = None):
-    remaining = db_functions.add_cart_item(album_id, request["state"]["sub"])
-    return JSONResponse(remaining,200)
+    stock_cart = db_functions.add_cart_item(album_id, request["state"]["sub"])
+    return JSONResponse(stock_cart,200)
+
+@api.post("/cart/{album_id}/remove",dependencies=[Depends(verify_token)])
+async def add_cart_item(request:Request, album_id,authorization: Annotated[Union[str, None], Header()] = None):
+    stock_cart = db_functions.remove_cart_item(album_id, request["state"]["sub"])
+    return JSONResponse(stock_cart,200)
 
 @api.get("/users/{username}",dependencies=[Depends(verify_token)])
 async def get_user(username):
