@@ -33,6 +33,13 @@ def create_user(username,password):
     conn.commit()
     return feedback
 
+def checkout_cart(order_id,username):
+    checkout_cmd = """update orders set confirmed = 'yes',ordered = timezone('utc', now())
+        from users where orders.order_id = %s and users.username = '%s';""" % (order_id,username)
+    cursor.execute(checkout_cmd)
+    response = "order %s has been successfully dispatched" % order_id if cursor.rowcount != 0 else "no order to checkout"
+    conn.commit()
+    return response   
 
 def remove_cart_item(album_id, username):
     try:

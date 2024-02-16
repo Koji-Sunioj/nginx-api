@@ -319,7 +319,7 @@ select
 	    coalesce(json_agg(orders) filter (where confirmed = 'no'),'[]') as cart
             from 
 	    (select users.username,users.created,orders.confirmed,
-		    json_build_object('order id',orders.order_id,'dispatched',
+		    json_build_object('order_id',orders.order_id,'dispatched',
 			orders.ordered,'balance',sum(orders_bridge.quantity * albums.price),'albums',
 				json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
 					artists.name,'quantity',orders_bridge.quantity,'price',albums.price))) as orders

@@ -96,13 +96,20 @@ async def get_orders_cart(username):
     orders_cart = db_functions.show_orders_cart(username)
     return JSONResponse(orders_cart,200)
 
+
+@api.post("/cart/{order_id}/checkout",dependencies=[Depends(verify_token)])
+async def checkout_cart_items(request:Request, order_id,authorization: Annotated[Union[str, None], Header()] = None):
+    response = db_functions.checkout_cart(order_id, request["state"]["sub"])
+    return JSONResponse({"detail":response},200)
+
+
 @api.post("/cart/{album_id}/add",dependencies=[Depends(verify_token)])
 async def add_cart_item(request:Request, album_id,authorization: Annotated[Union[str, None], Header()] = None):
     stock_cart = db_functions.add_cart_item(album_id, request["state"]["sub"])
     return JSONResponse(stock_cart,200)
 
 @api.post("/cart/{album_id}/remove",dependencies=[Depends(verify_token)])
-async def add_cart_item(request:Request, album_id,authorization: Annotated[Union[str, None], Header()] = None):
+async def del_cart_item(request:Request, album_id,authorization: Annotated[Union[str, None], Header()] = None):
     stock_cart = db_functions.remove_cart_item(album_id, request["state"]["sub"])
     return JSONResponse(stock_cart,200)
 
