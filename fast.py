@@ -67,7 +67,8 @@ async def get_albums(page: int = 1, sort: str = "name", direction: str = "ascend
 async def sign_in(request: Request):
     detail, code, token = "signed in", 200, None
     content = await request.json()
-    user = db_functions.select_one_user(content["username"], pwd=True)
+    user = db_functions.find_user(content["username"], pwd=True)
+    print(user)
     if user == None:
         detail, code = "cannot sign in", 401
     else:
@@ -89,7 +90,7 @@ async def sign_in(request: Request):
 async def check_token(request: Request, response: Response):
     try:
         body = await request.body()
-        jwt_payload = jwt.decode(str(body, encoding='utf-8'), key=fe_secret)
+        jwt.decode(str(body, encoding='utf-8'), key=fe_secret)
         response.status_code = 200
     except:
         response.status_code = 401
@@ -123,7 +124,7 @@ async def del_cart_item(request: Request, album_id):
 
 @api.get("/users/{username}", dependencies=[Depends(verify_token)])
 async def get_user(username):
-    user = db_functions.select_one_user(username)
+    user = db_functions.find_user(username)
     return JSONResponse({"user": jsonable_encoder(user)}, 200)
 
 
