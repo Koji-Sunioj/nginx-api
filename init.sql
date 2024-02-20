@@ -30,7 +30,7 @@ create table users(
     role varchar check (role in ('user','admin')),
     username varchar unique,
     password varchar not null,
-    created TIMESTAMP DEFAULT NOW()
+    created TIMESTAMP default timezone('utc', now()),
 );
 
 create table songs(
@@ -46,8 +46,7 @@ create table songs(
 create table orders(
     order_id serial primary key,
     user_id smallint,
-    confirmed varchar(3) default 'no',
-    ordered timestamp,
+    dispatched timestamp default timezone('utc', now()),
     foreign key (user_id) references users(user_id)
 );
 
@@ -62,6 +61,14 @@ create table orders_bridge(
     foreign key (order_id) references orders (order_id) on delete cascade
 );
 
+create table cart(
+	user_id smallint,
+	album_id smallint,
+	quantity smallint,
+	primary key (user_id,album_id),
+	foreign key (user_id) references users(user_id),
+	foreign key (album_id) references albums(album_id)
+);
 
 revoke all on schema public from public;
 CREATE role bm_admin LOGIN PASSWORD '18cba9cd-0776-4f09-9c0e-41d2937fab2b';

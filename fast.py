@@ -68,7 +68,6 @@ async def sign_in(request: Request):
     detail, code, token = "signed in", 200, None
     content = await request.json()
     user = db_functions.find_user(content["username"], pwd=True)
-    print(user)
     if user == None:
         detail, code = "cannot sign in", 401
     else:
@@ -103,9 +102,10 @@ async def get_orders_cart(username):
     return JSONResponse(orders_cart, 200)
 
 
-@api.post("/cart/{order_id}/checkout", dependencies=[Depends(verify_token)])
-async def checkout_cart_items(request: Request, order_id):
-    response = db_functions.checkout_cart(order_id, request["state"]["sub"])
+@api.post("/cart/{username}/checkout", dependencies=[Depends(verify_token)])
+async def checkout_cart_items(request: Request, username):
+    #if username == request.state.sub:
+    response = db_functions.checkout_cart(username)
     return JSONResponse({"detail": response}, 200)
 
 

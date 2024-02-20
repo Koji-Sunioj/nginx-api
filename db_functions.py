@@ -1,7 +1,6 @@
 import time
 import psycopg2
 import psycopg2.extras
-from psycopg2 import extensions 
 
 conn = psycopg2.connect(database="blackmetal",
                         host="localhost",
@@ -11,28 +10,53 @@ conn = psycopg2.connect(database="blackmetal",
 
 cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+
 def tsql(function):
     def transaction(*args, **kwargs):
         try:
             start = time.time()
             executed = function(*args, **kwargs)
             end = time.time()
-            print("%s ran and finished in %s seconds" % (function.__name__,round(end - start,3)))
+            print("%s ran and finished in %s seconds" %
+                  (function.__name__, round(end - start, 3)))
             conn.commit()
             return executed
         except Exception as error:
             print(error)
             conn.rollback()
-        
+
     return transaction
-   
 
 
 @tsql
 def show_orders_cart(username):
-    cursor.callproc('get_orders', (username,))
+    cart_cmd = """select json_build_object('balance',sum(cart.quantity * albums.price),
+        'albums',json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
+	    artists.name,'quantity',cart.quantity,'price',albums.price))) as cart from cart
+        join albums on albums.album_id = cart.album_id
+        join artists on artists.artist_id = albums.artist_id
+        join users on users.user_id = cart.user_id
+        where users.username = '%s'"""  % username
+    cursor.execute(cart_cmd)
     data = cursor.fetchone()
+
+    orders_cmd = """select coalesce(json_agg(orders),'[]') as orders from (select 
+	    json_build_object('order_id',orders.order_id,'dispatched',orders.dispatched,
+        'balance',sum(orders_bridge.quantity * albums.price),'albums',
+        json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
+        artists.name,'quantity',orders_bridge.quantity,'price',albums.price))) as orders
+        from orders
+        join orders_bridge on orders_bridge.order_id = orders.order_id
+        join albums on albums.album_id = orders_bridge.album_id
+        join artists on artists.artist_id = albums.artist_id
+        join users on users.user_id = orders.user_id
+        where users.username = '%s'
+        group by orders.order_id) orders;""" % username
+
+    cursor.execute(orders_cmd)
+    data.update(cursor.fetchone())
     return data
+
 
 @tsql
 def show_album(artist_name, album_name, username):
@@ -52,21 +76,22 @@ def show_album(artist_name, album_name, username):
         data.update(cart)
     return data
 
+
 @tsql
 def find_user(username, pwd=False):
-    pwd_parameter = ""
-    count_parameter = """, count(order_id) filter(where confirmed = 'yes') as orders,
-        count(order_id) filter(where confirmed = 'no') as cart"""
+    command = ""
     if pwd:
-        pwd_parameter = "password,"
-        count_parameter = ""
-        
-    command = """select username, %s created %s
-        from users  left join orders on orders.user_id = users.user_id 
-        where username = '%s' group by users.username,%s users.created""" % (pwd_parameter, count_parameter, username, pwd_parameter)
+        command += "select username, password,created from users where username ='%s';" % username
+    else:
+        command += """select username,created, coalesce(count(order_id),0) as orders,
+            coalesce(sum(quantity),0) as cart from users 
+            left join orders on users.user_id = orders.user_id
+            left join cart on cart.user_id = users.user_id where users.username = '%s'
+            group by username,created;""" % username
     cursor.execute(command)
     data = cursor.fetchone()
     return data
+
 
 @tsql
 def create_user(username, password):
@@ -82,105 +107,99 @@ def create_user(username, password):
         feedback = "user already exists"
     return feedback
 
+
 @tsql
-def checkout_cart(order_id, username):
-    checkout_cmd = """update orders set confirmed = 'yes',ordered = timezone('utc', now())
-        from users where orders.order_id = %s and users.username = '%s';""" % (order_id, username)
-    cursor.execute(checkout_cmd)
+def checkout_cart(username):
+    grab_quantity_cmd = """select users.user_id,
+        json_agg(json_build_object('album_id',album_id,'quantity',quantity)) as albums
+        from cart join users on users.username = '%s' group by users.user_id;""" % username
+    
+    cursor.execute(grab_quantity_cmd)
+    data = cursor.fetchone()
+    user_id,albums = data["user_id"],data["albums"]
+
+    new_order_cmd = "insert into orders (user_id) values (%s) returning order_id;" % user_id
+    cursor.execute(new_order_cmd)
+    order_id = cursor.fetchone()["order_id"]
+    
+    new_orders_bridge_cmd = "insert into orders_bridge (order_id,album_id,quantity) values "
+    
+    for n,album in enumerate(albums):
+        new_line = "(%s,%s,%s)" % (order_id,album["album_id"],album["quantity"])
+        eol = "," if len(albums) != n + 1 else ";"
+        new_line += eol
+        new_orders_bridge_cmd += new_line
+    
+    cursor.execute(new_orders_bridge_cmd)
+
+    remove_cart_cmd = "delete from cart where user_id = %s;" % user_id
+    cursor.execute(remove_cart_cmd)
+
     response = "order %s has been successfully dispatched" % order_id if cursor.rowcount != 0 else "no order to checkout"
     return response
 
+
 @tsql
 def remove_cart_item(album_id, username):
-    owner = get_cart_owner(username)
-    user_id, order_id = owner["user_id"], owner["order_id"]
+    user_id = get_cart_owner(username)
     update_cmd = """with orders_sub as 
-        (update orders_bridge set quantity = quantity - 1 
-        where order_id = %s and album_id = %s returning order_id,
-        album_id,quantity)
-        update albums set stock = stock + 1
-        from orders_sub
+        (update cart set quantity = quantity - 1 where user_id=%s and album_id=%s 
+	    returning album_id,quantity) 
+        update albums set stock = stock + 1 from orders_sub
         where (albums.album_id) IN (select album_id from orders_sub) 
-        returning quantity as cart, stock as remaining;""" % (order_id, album_id)
+        returning quantity as cart, stock as remaining;""" % (user_id, album_id)
     cursor.execute(update_cmd)
     results = cursor.fetchone()
-    
+
     if results["cart"] == 0:
-        remaining_cmd = """select sum(quantity) as quantity from orders 
-            join orders_bridge on orders.order_id = orders_bridge.order_id 
-            where confirmed = 'no' and user_id = %s;""" % user_id
-        cursor.execute(remaining_cmd)
-        quantity = cursor.fetchone()["quantity"]
-        if quantity == 0:
-            remove_cmd = """delete from orders where order_id = %s;""" % order_id
-        else:
-            remove_cmd = """ delete from orders_bridge where order_id = %s 
-                and album_id = %s;""" % (order_id, album_id)
+        remove_cmd = """delete from cart where user_id=%s and album_id=%s""" % (user_id,album_id)
         cursor.execute(remove_cmd)
 
     return results
+
 
 @tsql
 def get_cart_owner(username):
     user_cmd = "select user_id from users where username='%s';" % username
     cursor.execute(user_cmd)
     user_id = cursor.fetchone()["user_id"]
-
-    cart_cmd = "select order_id from orders where user_id =%s and confirmed = 'no';" % user_id
-    cursor.execute(cart_cmd)
-    cart = cursor.fetchone()
-    order_id = cart["order_id"] if cart is not None else None
-
-    return {"user_id": user_id, "order_id": order_id}
+    return user_id
 
 
 @tsql
 def add_cart_item(album_id, username):
-    owner = get_cart_owner(username)
-    user_id, order_id = owner["user_id"], owner["order_id"]
+    user_id = get_cart_owner(username)
+    cart_cmd = """insert into cart (user_id,album_id,quantity) 
+        select %s, %s, 1 where not exists (select user_id 
+        from cart where user_id =%s and album_id=%s);""" % (user_id, album_id, user_id, album_id)
 
-    if order_id != None:
-        insert_cmd = """insert into orders_bridge (order_id,album_id,quantity)
-            select %s, %s, 1 where not exists (select order_id from orders_bridge 
-            where order_id = %s and album_id = %s);""" % (order_id, album_id, order_id, album_id)
-        cursor.execute(insert_cmd)
+    cursor.execute(cart_cmd)
 
-        if cursor.rowcount == 0:
-            update_cmd = """update orders_bridge set quantity = quantity + 1
-                where order_id = %s and album_id = %s;""" % (order_id, album_id)
-            cursor.execute(update_cmd)
+    if cursor.rowcount == 0:
+        update_cmd = """update cart set quantity = quantity + 1 where 
+            user_id =%s and album_id =%s""" % (user_id, album_id)
+        cursor.execute(update_cmd)
 
-    else:
-        new_order_cmd = "insert into orders (user_id) values (%s) returning order_id;" % user_id
-        cursor.execute(new_order_cmd)
-        order_id = cursor.fetchone()["order_id"]
-
-        insert_cmd = """insert into orders_bridge (order_id,album_id,quantity) values (%s,%s,1);""" % (
-            order_id, album_id)
-        cursor.execute(insert_cmd)
-
-    decrement_stock_cmd = """
-        update albums set stock = albums.stock - 1 from 
-        (select albums.album_id,albums.stock,orders_bridge.quantity 
-            from orders_bridge join albums on albums.album_id = orders_bridge.album_id 
-            where order_id = %s and albums.album_id = %s) as sub 
+    decrement_stock_cmd = """update albums set stock = albums.stock - 1 from 
+        (select albums.album_id,albums.stock,cart.quantity 
+	    from cart join albums on albums.album_id = cart.album_id 
+	    where cart.user_id = %s and albums.album_id = %s) as sub 
         where sub.album_id = albums.album_id returning albums.stock as remaining, sub.quantity as cart
-        """ % (order_id, album_id)
+        """ % (user_id, album_id)
     cursor.execute(decrement_stock_cmd)
     remaining = cursor.fetchone()
     return remaining
 
+
 @tsql
 def get_cart_count(username, album_id):
-    command = """
-    select coalesce(sum(quantity),0) as cart from orders_bridge
-        join orders on orders_bridge.order_id = orders.order_id
-        join users on users.user_id = orders.user_id
-        where users.username = '%s' and orders_bridge.album_id = %s 
-        and orders.confirmed = 'no';""" % (username, album_id)
+    command = """select coalesce(sum(quantity),0) as cart from cart 
+        join users on users.user_id = cart.user_id where username = '%s' and 
+        album_id = %s;""" % (username, album_id)
     cursor.execute(command)
     data = cursor.fetchone()
     return data
+
 
 @tsql
 def show_artist(artist_name):
@@ -192,6 +211,7 @@ def show_artist(artist_name):
     cursor.execute(command)
     data = cursor.fetchone()
     return data
+
 
 @tsql
 def show_albums(page=1, sort="title", direction="ascending", query=None):
@@ -214,6 +234,3 @@ def show_albums(page=1, sort="title", direction="ascending", query=None):
     cursor.execute(command)
     data["data"] = cursor.fetchall()
     return data
-
-
-
