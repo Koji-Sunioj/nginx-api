@@ -17,7 +17,7 @@ def tsql(function):
             start = time.time()
             executed = function(*args, **kwargs)
             end = time.time()
-            print("%s ran and finished in %s seconds" %
+            print("%s elapsed in %s seconds" %
                   (function.__name__, round(end - start, 3)))
             conn.commit()
             return executed
@@ -78,16 +78,19 @@ def show_album(artist_name, album_name, username):
 
 
 @tsql
-def find_user(username, pwd=False):
+def find_user(username, type):
     command = ""
-    if pwd:
-        command += "select username, password,created from users where username ='%s';" % username
-    else:
-        command += """select username,created, coalesce(count(order_id),0) as orders,
-            coalesce(sum(quantity),0) as cart from users 
-            left join orders on users.user_id = orders.user_id
-            left join cart on cart.user_id = users.user_id where users.username = '%s'
-            group by username,created;""" % username
+    match type:
+        case "password":
+            command += "select username, password,created from users where username ='%s';" % username
+        case "owner":
+            command += "select user_id from users where username='%s';" % username
+        case "cart":
+            command += """select username,created, coalesce(count(distinct(order_id)),0) as orders,
+                coalesce(count(distinct(album_id)),0) as cart from users 
+                left join orders on users.user_id = orders.user_id
+                left join cart on cart.user_id = users.user_id where users.username = '%s'
+                group by username,created;""" % username      
     cursor.execute(command)
     data = cursor.fetchone()
     return data
@@ -141,7 +144,7 @@ def checkout_cart(username):
 
 @tsql
 def remove_cart_item(album_id, username):
-    user_id = get_cart_owner(username)
+    user_id = find_user(username,"owner")["user_id"]
     update_cmd = """with orders_sub as 
         (update cart set quantity = quantity - 1 where user_id=%s and album_id=%s 
 	    returning album_id,quantity) 
@@ -159,16 +162,8 @@ def remove_cart_item(album_id, username):
 
 
 @tsql
-def get_cart_owner(username):
-    user_cmd = "select user_id from users where username='%s';" % username
-    cursor.execute(user_cmd)
-    user_id = cursor.fetchone()["user_id"]
-    return user_id
-
-
-@tsql
 def add_cart_item(album_id, username):
-    user_id = get_cart_owner(username)
+    user_id = find_user(username,"owner")["user_id"]
     cart_cmd = """insert into cart (user_id,album_id,quantity) 
         select %s, %s, 1 where not exists (select user_id 
         from cart where user_id =%s and album_id=%s);""" % (user_id, album_id, user_id, album_id)
