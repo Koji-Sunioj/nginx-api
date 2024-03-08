@@ -2,6 +2,7 @@ import re
 import db_functions
 from jose import jwt
 from typing import Union
+from dotenv import dotenv_values
 from typing_extensions import Annotated
 from passlib.context import CryptContext
 from datetime import timedelta, datetime
@@ -14,7 +15,7 @@ app = FastAPI()
 api = APIRouter(prefix="/api")
 auth = APIRouter(prefix="/auth")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-fe_secret = "3abb39aa-8df8-481e-8479-b4d868f45b12"
+fe_secret = dotenv_values(".env")["FE_SECRET"]
 
 
 async def verify_token(request: Request, authorization: Annotated[str, Header()]):
@@ -27,7 +28,7 @@ async def verify_token(request: Request, authorization: Annotated[str, Header()]
         raise HTTPException(status_code=401, detail="invalid credentials")
 
 
-@app.middleware("http")
+""" @app.middleware("http")
 async def check_same_site_or_cookie(request: Request, call_next):
     response = await call_next(request)
     same_site = "sec-fetch-site" in request.headers and request.headers["sec-fetch-site"] == "same-origin"
@@ -35,7 +36,7 @@ async def check_same_site_or_cookie(request: Request, call_next):
     if same_site or has_headers:
         return response
     else:
-        return JSONResponse({"detail": "not authorized"}, 401)
+        return JSONResponse({"detail": "not authorized"}, 401) """
 
 
 @api.get("/artist/{artist_name}")
@@ -130,10 +131,9 @@ async def get_user(username):
 @api.post("/register")
 async def register(request: Request):
     content = await request.json()
-    detail, code = "user created", 200
-    detail = db_functions.create_user(
+    created = db_functions.create_user(
         content["username"], pwd_context.hash(content["password"]))
-    code = 400 if "already exists" in detail else code
+    code,detail = (400,"error creating user") if not created else (200,"user created")
     return JSONResponse({"detail": detail}, code)
 
 app.include_router(api)

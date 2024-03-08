@@ -1,11 +1,12 @@
 import time
 import psycopg2
 import psycopg2.extras
+from dotenv import dotenv_values
 
 conn = psycopg2.connect(database="blackmetal",
                         host="localhost",
                         user="bm_admin",
-                        password="18cba9cd-0776-4f09-9c0e-41d2937fab2b",
+                        password=dotenv_values(".env")["DB_PASSWORD"],
                         port=5432)
 
 cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -24,6 +25,7 @@ def tsql(function):
         except Exception as error:
             print(error)
             conn.rollback()
+            return False
 
     return transaction
 
@@ -98,17 +100,17 @@ def find_user(username, type):
 
 @tsql
 def create_user(username, password):
-    feedback = ""
+    guest_list = dotenv_values(".env")["GUEST_LIST"].split(",")
+    guest_dict = {key.split(":")[0]:key.split(":")[1] for key in guest_list}
     cursor = conn.cursor()
-    role = "admin" if username in ["varg_vikernes"] else "user"
-    try:
-        command = "insert into users (username,password,role) values ('%s','%s','%s')" % (
-            username, password, role)
-        cursor.execute(command)
-        feedback = "new user created"
-    except psycopg2.errors.UniqueViolation:
-        feedback = "user already exists"
-    return feedback
+    if username not in guest_dict:
+        raise Exception("not on guest list sorry")
+    role = guest_dict[username]
+    command = "insert into users (username,password,role) values ('%s','%s','%s')" % (
+        username, password, role)
+    cursor.execute(command)
+    created = True
+    return created
 
 
 @tsql
