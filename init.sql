@@ -30,7 +30,7 @@ create table users(
     role varchar check (role in ('user','admin')),
     username varchar unique,
     password varchar not null,
-    created TIMESTAMP default timezone('utc', now()),
+    created TIMESTAMP default timezone('utc', now())
 );
 
 create table songs(
@@ -316,26 +316,3 @@ insert into songs (track,album_id,duration,song) values
 (5,1021,708.0,'Veles Scrolls'),
 (6,1021,430.0,'Kolyada'),
 (7,1021,232.0,'Eternal Circle');
-
-CREATE OR REPLACE FUNCTION get_orders(api_username varchar) RETURNS  table (
-		orders json,
-		cart json
-	) 
-AS $$
-select
-	    coalesce(json_agg(orders) filter (where confirmed = 'yes'),'[]') as orders,
-	    coalesce(json_agg(orders) filter (where confirmed = 'no'),'[]') as cart
-            from 
-	    (select users.username,users.created,orders.confirmed,
-		    json_build_object('order_id',orders.order_id,'dispatched',
-			orders.ordered,'balance',sum(orders_bridge.quantity * albums.price),'albums',
-				json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
-					artists.name,'quantity',orders_bridge.quantity,'price',albums.price))) as orders
-	    from users 
-            left join orders on users.user_id = orders.user_id
-            left join orders_bridge on orders.order_id = orders_bridge.order_id
-            left join albums on albums.album_id = orders_bridge.album_id
-            left join artists on artists.artist_id = albums.artist_id 
-	    where users.username = api_username group by orders.order_id,users.username,users.created) 
-        order_values group by username,created;
-$$ LANGUAGE sql;
