@@ -71,7 +71,7 @@ create table cart(
 );
 
 revoke all on schema public from public;
-CREATE role bm_admin LOGIN PASSWORD '18cba9cd-0776-4f09-9c0e-41d2937fab2b';
+CREATE role bm_admin LOGIN PASSWORD;
 GRANT CONNECT ON database blackmetal TO bm_admin;
 GRANT USAGE on schema public to bm_admin;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO bm_admin;
