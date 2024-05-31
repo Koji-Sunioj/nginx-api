@@ -28,17 +28,6 @@ async def verify_token(request: Request, authorization: Annotated[str, Header()]
         raise HTTPException(status_code=401, detail="invalid credentials")
 
 
-""" @app.middleware("http")
-async def check_same_site_or_cookie(request: Request, call_next):
-    response = await call_next(request)
-    same_site = "sec-fetch-site" in request.headers and request.headers["sec-fetch-site"] == "same-origin"
-    has_headers = "cookie" in request.headers
-    if same_site or has_headers:
-        return response
-    else:
-        return JSONResponse({"detail": "not authorized"}, 401) """
-
-
 @api.get("/artist/{artist_name}")
 async def get_artist(artist_name):
     artist_name = re.sub("\-", " ", artist_name).replace("'", "''")
@@ -85,7 +74,6 @@ async def sign_in(request: Request):
     return JSONResponse({"detail": detail, "token": token}, code)
 
 
-@api.post("/check-token")
 @auth.post("/check-token")
 async def check_token(request: Request, response: Response):
     try:
@@ -124,7 +112,7 @@ async def del_cart_item(request: Request, album_id):
 
 @api.get("/users/{username}", dependencies=[Depends(verify_token)])
 async def get_user(username):
-    user = db_functions.find_user(username,"cart")
+    user = db_functions.find_user(username, "cart")
     return JSONResponse({"user": jsonable_encoder(user)}, 200)
 
 
@@ -133,7 +121,8 @@ async def register(request: Request):
     content = await request.json()
     created = db_functions.create_user(
         content["username"], pwd_context.hash(content["password"]))
-    code,detail = (400,"error creating user") if not created else (200,"user created")
+    code, detail = (400, "error creating user") if not created else (
+        200, "user created")
     return JSONResponse({"detail": detail}, code)
 
 app.include_router(api)

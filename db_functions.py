@@ -32,45 +32,14 @@ def tsql(function):
 
 @tsql
 def show_orders_cart(username):
-    cart_cmd = """select json_build_object('balance',sum(cart.quantity * albums.price),
-        'albums',json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
-	    artists.name,'quantity',cart.quantity,'price',albums.price))) as cart from cart
-        join albums on albums.album_id = cart.album_id
-        join artists on artists.artist_id = albums.artist_id
-        join users on users.user_id = cart.user_id
-        where users.username = '%s'"""  % username
-    cursor.execute(cart_cmd)
+    cursor.callproc("get_orders_and_cart", (username,))
     data = cursor.fetchone()
-
-    orders_cmd = """select coalesce(json_agg(orders),'[]') as orders from (select 
-	    json_build_object('order_id',orders.order_id,'dispatched',orders.dispatched,
-        'balance',sum(orders_bridge.quantity * albums.price),'albums',
-        json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
-        artists.name,'quantity',orders_bridge.quantity,'price',albums.price))) as orders
-        from orders
-        join orders_bridge on orders_bridge.order_id = orders.order_id
-        join albums on albums.album_id = orders_bridge.album_id
-        join artists on artists.artist_id = albums.artist_id
-        join users on users.user_id = orders.user_id
-        where users.username = '%s'
-        group by orders.order_id) orders;""" % username
-
-    cursor.execute(orders_cmd)
-    data.update(cursor.fetchone())
     return data
 
 
 @tsql
 def show_album(artist_name, album_name, username):
-    command = """
-    select json_build_object('album_id',albums.album_id,'name', name,'title', title, 'release_year',
-        release_year,'photo', photo,'stock', stock,'price',price::float) as album,
-        json_agg(json_build_object('track',track,'song',song,'duration',duration))  as songs
-        from albums join artists on artists.artist_id = albums.artist_id
-	    join songs on songs.album_id = albums.album_id where
-	    lower(name) = '%s' and lower(title) = '%s' group by albums.album_id,name;""" % (artist_name, album_name)
-
-    cursor.execute(command)
+    cursor.callproc("get_album", (artist_name, album_name))
     data = cursor.fetchone()
 
     if username:
@@ -92,7 +61,7 @@ def find_user(username, type):
                 coalesce(count(distinct(album_id)),0) as cart from users 
                 left join orders on users.user_id = orders.user_id
                 left join cart on cart.user_id = users.user_id where users.username = '%s'
-                group by username,created;""" % username      
+                group by username,created;""" % username
     cursor.execute(command)
     data = cursor.fetchone()
     return data
@@ -101,7 +70,7 @@ def find_user(username, type):
 @tsql
 def create_user(username, password):
     guest_list = dotenv_values(".env")["GUEST_LIST"].split(",")
-    guest_dict = {key.split(":")[0]:key.split(":")[1] for key in guest_list}
+    guest_dict = {key.split(":")[0]: key.split(":")[1] for key in guest_list}
     cursor = conn.cursor()
     if username not in guest_dict:
         raise Exception("not on guest list sorry")
@@ -118,23 +87,24 @@ def checkout_cart(username):
     grab_quantity_cmd = """select users.user_id,
         json_agg(json_build_object('album_id',album_id,'quantity',quantity)) as albums
         from cart join users on users.username = '%s' group by users.user_id;""" % username
-    
+
     cursor.execute(grab_quantity_cmd)
     data = cursor.fetchone()
-    user_id,albums = data["user_id"],data["albums"]
+    user_id, albums = data["user_id"], data["albums"]
 
     new_order_cmd = "insert into orders (user_id) values (%s) returning order_id;" % user_id
     cursor.execute(new_order_cmd)
     order_id = cursor.fetchone()["order_id"]
-    
+
     new_orders_bridge_cmd = "insert into orders_bridge (order_id,album_id,quantity) values "
-    
-    for n,album in enumerate(albums):
-        new_line = "(%s,%s,%s)" % (order_id,album["album_id"],album["quantity"])
+
+    for n, album in enumerate(albums):
+        new_line = "(%s,%s,%s)" % (
+            order_id, album["album_id"], album["quantity"])
         eol = "," if len(albums) != n + 1 else ";"
         new_line += eol
         new_orders_bridge_cmd += new_line
-    
+
     cursor.execute(new_orders_bridge_cmd)
 
     remove_cart_cmd = "delete from cart where user_id = %s;" % user_id
@@ -146,7 +116,7 @@ def checkout_cart(username):
 
 @tsql
 def remove_cart_item(album_id, username):
-    user_id = find_user(username,"owner")["user_id"]
+    user_id = find_user(username, "owner")["user_id"]
     update_cmd = """with orders_sub as 
         (update cart set quantity = quantity - 1 where user_id=%s and album_id=%s 
 	    returning album_id,quantity) 
@@ -157,7 +127,8 @@ def remove_cart_item(album_id, username):
     results = cursor.fetchone()
 
     if results["cart"] == 0:
-        remove_cmd = """delete from cart where user_id=%s and album_id=%s""" % (user_id,album_id)
+        remove_cmd = """delete from cart where user_id=%s and album_id=%s""" % (
+            user_id, album_id)
         cursor.execute(remove_cmd)
 
     return results
@@ -165,7 +136,7 @@ def remove_cart_item(album_id, username):
 
 @tsql
 def add_cart_item(album_id, username):
-    user_id = find_user(username,"owner")["user_id"]
+    user_id = find_user(username, "owner")["user_id"]
     cart_cmd = """insert into cart (user_id,album_id,quantity) 
         select %s, %s, 1 where not exists (select user_id 
         from cart where user_id =%s and album_id=%s);""" % (user_id, album_id, user_id, album_id)
@@ -190,11 +161,9 @@ def add_cart_item(album_id, username):
 
 @tsql
 def get_cart_count(username, album_id):
-    command = """select coalesce(sum(quantity),0) as cart from cart 
-        join users on users.user_id = cart.user_id where username = '%s' and 
-        album_id = %s;""" % (username, album_id)
-    cursor.execute(command)
+    cursor.callproc("get_cart_count", (username, album_id))
     data = cursor.fetchone()
+    print(data)
     return data
 
 

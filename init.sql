@@ -77,6 +77,53 @@ GRANT USAGE on schema public to bm_admin;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO bm_admin;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bm_admin;
 
+create function get_album(in artist_name varchar, in album_name varchar,out album json, out songs json) 
+returns setof record as 
+$$
+    select json_build_object('album_id',albums.album_id,'name', name,'title', title, 'release_year',
+        release_year,'photo', photo,'stock', stock,'price',price::float) as album,
+        json_agg(json_build_object('track',track,'song',song,'duration',duration))  as songs
+    from albums join artists on artists.artist_id = albums.artist_id
+    join songs on songs.album_id = albums.album_id 
+    where
+    lower(name) = $1 and lower(title) = $2 group by albums.album_id,name;
+$$ language sql;
+
+create function get_cart_count(in username varchar, in album_id int, out cart bigint) 
+returns bigint as
+$$
+    select coalesce(sum(quantity),0) as cart from cart 
+    join users on users.user_id = cart.user_id 
+    where users.username = $1 and cart.album_id = $2;
+$$ language sql;
+
+create function get_orders_and_cart(in username varchar, out cart json, out orders json) 
+returns setof record as
+$$
+    select cart, orders from
+    (select json_build_object('balance',sum(cart.quantity * albums.price),
+    'albums',json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
+    artists.name,'quantity',cart.quantity,'price',albums.price))) as cart from cart
+    join albums on albums.album_id = cart.album_id
+    join artists on artists.artist_id = albums.artist_id
+    join users on users.user_id = cart.user_id
+    where users.username = 'varg_vikernes') AS cart,
+
+    (select coalesce(json_agg(orders),'[]') as orders from (select 
+    json_build_object('order_id',orders.order_id,'dispatched',orders.dispatched,
+    'balance',sum(orders_bridge.quantity * albums.price),'albums',
+    json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
+    artists.name,'quantity',orders_bridge.quantity,'price',albums.price))) as orders
+    from orders
+    join orders_bridge on orders_bridge.order_id = orders.order_id
+    join albums on albums.album_id = orders_bridge.album_id
+    join artists on artists.artist_id = albums.artist_id
+    join users on users.user_id = orders.user_id
+    where users.username = 'varg_vikernes'
+    group by orders.order_id) orders ) AS orders;
+$$ language sql;
+
+
 insert into artists (artist_id, name, bio) values
 (100,'Ascension','Black metal band from Tornau vor der Heide, Saxony-Anhalt, Germany.'),
 (101,'The Black','Black metal band from Sweden.
