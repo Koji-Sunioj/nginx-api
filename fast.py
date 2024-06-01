@@ -41,8 +41,8 @@ async def get_album(artist_name, album_name, request: Request, authorization: An
     if authorization:
         await verify_token(request, authorization)
         username = request["state"]["sub"]
-    artist_name = re.sub("\-", " ", artist_name).replace("'", "''")
-    album_name = re.sub("\-", " ", album_name).replace("'", "''")
+    artist_name = re.sub("\-", " ", artist_name)
+    album_name = re.sub("\-", " ", album_name)
     album = db_functions.show_album(artist_name, album_name, username)
     return JSONResponse(album, 200)
 
@@ -58,6 +58,7 @@ async def sign_in(request: Request):
     detail, code, token = "signed in", 200, None
     content = await request.json()
     user = db_functions.find_user(content["username"], "password")
+    print(user)
     if user == None:
         detail, code = "cannot sign in", 401
     else:

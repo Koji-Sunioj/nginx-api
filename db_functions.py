@@ -50,20 +50,8 @@ def show_album(artist_name, album_name, username):
 
 @tsql
 def find_user(username, type):
-    command = ""
-    match type:
-        case "password":
-            command += "select username, password,created from users where username ='%s';" % username
-        case "owner":
-            command += "select user_id from users where username='%s';" % username
-        case "cart":
-            command += """select username,created, coalesce(count(distinct(order_id)),0) as orders,
-                coalesce(count(distinct(album_id)),0) as cart from users 
-                left join orders on users.user_id = orders.user_id
-                left join cart on cart.user_id = users.user_id where users.username = '%s'
-                group by username,created;""" % username
-    cursor.execute(command)
-    data = cursor.fetchone()
+    cursor.callproc("get_user", (username, type))
+    data = cursor.fetchone()["bm_user"]
     return data
 
 
@@ -163,18 +151,12 @@ def add_cart_item(album_id, username):
 def get_cart_count(username, album_id):
     cursor.callproc("get_cart_count", (username, album_id))
     data = cursor.fetchone()
-    print(data)
     return data
 
 
 @tsql
 def show_artist(artist_name):
-    command = """
-    select name, bio, json_agg(json_build_object('title',title,'name',name,'release_year',release_year,
-        'photo',photo,'stock',stock,'price',price::float)) as albums from albums 
-        join artists on artists.artist_id = albums.artist_id 
-        where lower(name) like '%{0}%' group by artists.artist_id;""".format(artist_name)
-    cursor.execute(command)
+    cursor.callproc("get_artist", (artist_name,))
     data = cursor.fetchone()
     return data
 

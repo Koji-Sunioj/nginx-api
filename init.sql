@@ -77,8 +77,7 @@ GRANT USAGE on schema public to bm_admin;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO bm_admin;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bm_admin;
 
-create function get_album(in artist_name varchar, in album_name varchar,out album json, out songs json) 
-returns setof record as 
+create function get_album(in artist_name varchar, in album_name varchar,out album json, out songs json) as
 $$
     select json_build_object('album_id',albums.album_id,'name', name,'title', title, 'release_year',
         release_year,'photo', photo,'stock', stock,'price',price::float) as album,
@@ -89,16 +88,14 @@ $$
     lower(name) = $1 and lower(title) = $2 group by albums.album_id,name;
 $$ language sql;
 
-create function get_cart_count(in username varchar, in album_id int, out cart bigint) 
-returns bigint as
+create function get_cart_count(in username varchar, in album_id int, out cart bigint) as
 $$
     select coalesce(sum(quantity),0) as cart from cart 
     join users on users.user_id = cart.user_id 
     where users.username = $1 and cart.album_id = $2;
 $$ language sql;
 
-create function get_orders_and_cart(in username varchar, out cart json, out orders json) 
-returns setof record as
+create function get_orders_and_cart(in username varchar, out cart json, out orders json) as
 $$
     select cart, orders from
     (select json_build_object('balance',sum(cart.quantity * albums.price),
@@ -122,6 +119,38 @@ $$
     where users.username = 'varg_vikernes'
     group by orders.order_id) orders ) AS orders;
 $$ language sql;
+
+create function get_artist(in artist_name varchar,out name varchar,out bio varchar,out albums json) as
+$$
+    select name, bio, json_agg(json_build_object('title',title,'name',name,'release_year',release_year,
+    'photo',photo,'stock',stock,'price',price::float)) as albums from albums 
+    join artists on artists.artist_id = albums.artist_id 
+    where lower(name) like '%' || $1 || '%' group by artists.artist_id;
+$$ language sql;
+
+create function get_user(in api_username varchar,in task varchar,out bm_user json) 
+returns setof json as 
+$$
+begin
+    case task
+        when 'owner' then
+            return query select json_build_object('user_id',users.user_id) as bm_user 
+            from users where users.username=$1;
+        when 'password' then
+            return query select json_build_object('username',users.username,'password',users.password,
+            'created',users.created) as bm_user
+            from users where username = $1;
+        when 'cart' then
+            return query select json_build_object('username',users.username,'created',users.created,'orders', 
+            coalesce(count(distinct(order_id)), 0),'cart',coalesce(count(distinct(album_id)),0)) as bm_user 
+            from users 
+            left join orders on users.user_id = orders.user_id
+            left join cart on cart.user_id = users.user_id where users.username = $1
+            group by username,created;
+    end case;
+end
+
+$$ language plpgsql;
 
 
 insert into artists (artist_id, name, bio) values
