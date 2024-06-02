@@ -30,7 +30,7 @@ create table users(
     role varchar check (role in ('user','admin')),
     username varchar unique,
     password varchar not null,
-    created TIMESTAMP default timezone('utc', now())
+    created timestamp default timezone('utc', now())
 );
 
 create table songs(
@@ -71,11 +71,11 @@ create table cart(
 );
 
 revoke all on schema public from public;
-CREATE role bm_admin LOGIN PASSWORD;
-GRANT CONNECT ON database blackmetal TO bm_admin;
-GRANT USAGE on schema public to bm_admin;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO bm_admin;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bm_admin;
+create role bm_admin login password;
+grant connect on database blackmetal TO bm_admin;
+grant usage on schema public to bm_admin;
+grant select, insert, update, delete on all tables in schema public to bm_admin;
+grant usage, select on all sequences in schema public to bm_admin;
 
 create function get_album(in artist_name varchar, in album_name varchar,out album json, out songs json) as
 $$
@@ -147,11 +147,57 @@ begin
             left join orders on users.user_id = orders.user_id
             left join cart on cart.user_id = users.user_id where users.username = $1
             group by username,created;
+        when 'checkout' then
+            return query select json_build_object('user_id',users.user_id,'albums',
+            json_agg(json_build_object('album_id',album_id,'quantity',quantity))) as bm_user
+            from cart 
+            join users on users.username = $1 
+            group by users.user_id;
     end case;
 end
-
 $$ language plpgsql;
 
+create function get_pages(in query varchar default null,out pages int) returns setof int as 
+$$
+begin
+    if $1 is null then
+        return query select ceil(count(album_id)::float / 8)::int as pages 
+        from albums
+        join artists on artists.artist_id = albums.artist_id;
+    else
+        return query select ceil(count(album_id)::float / 8)::int as pages 
+        from albums
+        join artists on artists.artist_id = albums.artist_id 
+        where lower(name) like '%' || $1 || '%'  or lower(title) like '%' || $1 || '%';
+    end if;
+end
+$$ language plpgsql;
+
+create function get_albums(in page int,in sort varchar,in direction varchar,in query varchar default null)
+returns table (
+	name varchar, 
+    title varchar,
+    release_year smallint, 
+    photo varchar,
+    stock smallint, 
+    price double precision
+) as 
+$$
+declare 
+new_offset smallint := ($1 - 1) * 8;
+begin
+    if $4 is null then
+        return query execute format('
+        select artists.name, albums.title, albums.release_year, 
+        albums.photo, albums.stock,albums.price::float
+        from albums 
+        join artists on artists.artist_id = albums.artist_id 
+        order by %I' 
+        || case $3 when 'ascending' then ' asc ' when 'descending' then ' desc ' end || 
+        'limit 8 offset %s',$2,new_offset); 
+    end if;
+end
+$$ language plpgsql;
 
 insert into artists (artist_id, name, bio) values
 (100,'Ascension','Black metal band from Tornau vor der Heide, Saxony-Anhalt, Germany.'),

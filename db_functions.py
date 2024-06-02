@@ -72,12 +72,7 @@ def create_user(username, password):
 
 @tsql
 def checkout_cart(username):
-    grab_quantity_cmd = """select users.user_id,
-        json_agg(json_build_object('album_id',album_id,'quantity',quantity)) as albums
-        from cart join users on users.username = '%s' group by users.user_id;""" % username
-
-    cursor.execute(grab_quantity_cmd)
-    data = cursor.fetchone()
+    data = find_user(username, "checkout")
     user_id, albums = data["user_id"], data["albums"]
 
     new_order_cmd = "insert into orders (user_id) values (%s) returning order_id;" % user_id
@@ -166,9 +161,7 @@ def show_albums(page=1, sort="title", direction="ascending", query=None):
     search, paginate_string, data = "", "", {}
     search = "where lower(name) like '%{0}%' or lower(title) like '%{0}%'".format(
         query) if query != None else ""
-    page_command = """select ceil(count(album_id)::float / 8)::int as pages from albums
-        join artists on artists.artist_id = albums.artist_id %s;""" % search
-    cursor.execute(page_command)
+    cursor.callproc("get_pages", (query,))
     data["pages"] = cursor.fetchone()["pages"]
 
     offset = (page - 1) * 8
@@ -179,6 +172,7 @@ def show_albums(page=1, sort="title", direction="ascending", query=None):
         from albums join artists on artists.artist_id = albums.artist_id
         %s %s;""" % (search, paginate_string)
 
+    print(command)
     cursor.execute(command)
     data["data"] = cursor.fetchall()
     return data
