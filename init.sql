@@ -185,32 +185,6 @@ returns table (
 $$
 declare 
 new_offset smallint := ($1 - 1) * 8;
-begin
-    if $4 is null then
-        return query execute format('
-        select artists.name, albums.title, albums.release_year, 
-        albums.photo, albums.stock,albums.price::float
-        from albums 
-        join artists on artists.artist_id = albums.artist_id 
-        order by %I' 
-        || case $3 when 'ascending' then ' asc ' when 'descending' then ' desc ' end || 
-        'limit 8 offset %s',$2,new_offset); 
-    end if;
-end
-$$ language plpgsql;
-
-create function get_albums(in page int,in sort varchar,in direction varchar,in query varchar default null)
-returns table (
-	name varchar, 
-    title varchar,
-    release_year smallint, 
-    photo varchar,
-    stock smallint, 
-    price double precision
-) as 
-$$
-declare 
-new_offset smallint := ($1 - 1) * 8;
 new_query varchar := ' where lower(name) like lower(''%' || $4 || '%'') or lower(title) like lower(''%' || $4 || '%'')';
 begin  
     return query execute '
