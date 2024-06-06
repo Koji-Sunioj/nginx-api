@@ -158,21 +158,9 @@ def show_artist(artist_name):
 
 @tsql
 def show_albums(page=1, sort="title", direction="ascending", query=None):
-    search, paginate_string, data = "", "", {}
-    search = "where lower(name) like '%{0}%' or lower(title) like '%{0}%'".format(
-        query) if query != None else ""
+    data = {}
     cursor.callproc("get_pages", (query,))
     data["pages"] = cursor.fetchone()["pages"]
-
-    offset = (page - 1) * 8
-    dir_pointer = {"ascending": "asc", "descending": "desc"}
-    paginate_string = "order by %s %s limit 8 offset %s" % (
-        sort, dir_pointer[direction], offset)
-    command = """select name, title, release_year, photo, stock,price::float
-        from albums join artists on artists.artist_id = albums.artist_id
-        %s %s;""" % (search, paginate_string)
-
-    print(command)
-    cursor.execute(command)
+    cursor.callproc("get_albums", (page, sort, direction, query))
     data["data"] = cursor.fetchall()
     return data

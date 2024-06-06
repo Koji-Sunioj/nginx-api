@@ -199,6 +199,32 @@ begin
 end
 $$ language plpgsql;
 
+create function get_albums(in page int,in sort varchar,in direction varchar,in query varchar default null)
+returns table (
+	name varchar, 
+    title varchar,
+    release_year smallint, 
+    photo varchar,
+    stock smallint, 
+    price double precision
+) as 
+$$
+declare 
+new_offset smallint := ($1 - 1) * 8;
+new_query varchar := ' where lower(name) like lower(''%' || $4 || '%'') or lower(title) like lower(''%' || $4 || '%'')';
+begin  
+    return query execute '
+    select artists.name, albums.title, albums.release_year, 
+    albums.photo, albums.stock,albums.price::float
+    from albums
+    join artists on artists.artist_id = albums.artist_id'
+    || case when $4 is not null then new_query else ' ' end || 
+    'order by'
+    || case $3 when 'ascending' then format(' %s asc ',$2) when 'descending' then format(' %s desc ',$2) end || 
+    format('limit 8 offset %s',new_offset); 
+end
+$$ language plpgsql;
+
 insert into artists (artist_id, name, bio) values
 (100,'Ascension','Black metal band from Tornau vor der Heide, Saxony-Anhalt, Germany.'),
 (101,'The Black','Black metal band from Sweden.
