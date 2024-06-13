@@ -58,7 +58,7 @@ async def sign_in(request: Request):
     detail, code, token = "signed in", 200, None
     content = await request.json()
     user = db_functions.find_user(content["username"], "password")
-    if user == None:
+    if not user:
         detail, code = "cannot sign in", 401
     else:
         verified = pwd_context.verify(content["password"], user["password"])

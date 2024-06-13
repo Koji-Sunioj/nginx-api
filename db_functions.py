@@ -63,10 +63,8 @@ def create_user(username, password):
     if username not in guest_dict:
         raise Exception("not on guest list sorry")
     role = guest_dict[username]
-    command = "insert into users (username,password,role) values ('%s','%s','%s')" % (
-        username, password, role)
-    cursor.execute(command)
-    created = True
+    cursor.callproc('create_user', (username, password, role))
+    created = cursor.rowcount > 0
     return created
 
 
@@ -75,23 +73,14 @@ def checkout_cart(username):
     data = find_user(username, "checkout")
     user_id, albums = data["user_id"], data["albums"]
 
-    new_order_cmd = "insert into orders (user_id) values (%s) returning order_id;" % user_id
-    cursor.execute(new_order_cmd)
+    cursor.callproc("create_order", (user_id,))
     order_id = cursor.fetchone()["order_id"]
+    album_ids = [album["album_id"] for album in albums]
+    quantities = [album["quantity"] for album in albums]
 
-    new_orders_bridge_cmd = "insert into orders_bridge (order_id,album_id,quantity) values "
+    cursor.callproc("create_dispatch_items", (order_id, album_ids, quantities))
 
-    for n, album in enumerate(albums):
-        new_line = "(%s,%s,%s)" % (
-            order_id, album["album_id"], album["quantity"])
-        eol = "," if len(albums) != n + 1 else ";"
-        new_line += eol
-        new_orders_bridge_cmd += new_line
-
-    cursor.execute(new_orders_bridge_cmd)
-
-    remove_cart_cmd = "delete from cart where user_id = %s;" % user_id
-    cursor.execute(remove_cart_cmd)
+    cursor.callproc("remove_cart_items", (user_id,))
 
     response = "order %s has been successfully dispatched" % order_id if cursor.rowcount != 0 else "no order to checkout"
     return response

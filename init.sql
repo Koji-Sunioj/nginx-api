@@ -199,6 +199,30 @@ begin
 end
 $$ language plpgsql;
 
+create function create_user(in username varchar, in password varchar, in role varchar) 
+returns void as
+$$
+    insert into users (username,password,role) values ($1,$2,$3);
+$$ language sql;
+
+create function create_order(in user_id int,out order_id int) as
+$$
+    insert into orders (user_id) values ($1) returning order_id;
+$$ language sql;
+
+create function create_dispatch_items(in order_id int, in album_ids int[], in quantities int[]) 
+returns void as
+$$
+    insert into orders_bridge (order_id,album_id,quantity)
+    select  $1, unnest($2),unnest($3);
+$$ language sql;
+
+create function remove_cart_items(in user_id int) 
+returns void as
+$$
+    delete from cart where user_id = $1;
+$$ language sql;
+
 insert into artists (artist_id, name, bio) values
 (100,'Ascension','Black metal band from Tornau vor der Heide, Saxony-Anhalt, Germany.'),
 (101,'The Black','Black metal band from Sweden.
