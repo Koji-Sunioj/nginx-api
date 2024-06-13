@@ -89,19 +89,12 @@ def checkout_cart(username):
 @tsql
 def remove_cart_item(album_id, username):
     user_id = find_user(username, "owner")["user_id"]
-    update_cmd = """with orders_sub as 
-        (update cart set quantity = quantity - 1 where user_id=%s and album_id=%s 
-	    returning album_id,quantity) 
-        update albums set stock = stock + 1 from orders_sub
-        where (albums.album_id) IN (select album_id from orders_sub) 
-        returning quantity as cart, stock as remaining;""" % (user_id, album_id)
-    cursor.execute(update_cmd)
+
+    cursor.callproc("decrement_cart_increment_stock", (user_id, album_id))
     results = cursor.fetchone()
 
     if results["cart"] == 0:
-        remove_cmd = """delete from cart where user_id=%s and album_id=%s""" % (
-            user_id, album_id)
-        cursor.execute(remove_cmd)
+        cursor.callproc("remove_cart_items", (user_id, album_id))
 
     return results
 
@@ -109,24 +102,15 @@ def remove_cart_item(album_id, username):
 @tsql
 def add_cart_item(album_id, username):
     user_id = find_user(username, "owner")["user_id"]
-    cart_cmd = """insert into cart (user_id,album_id,quantity) 
-        select %s, %s, 1 where not exists (select user_id 
-        from cart where user_id =%s and album_id=%s);""" % (user_id, album_id, user_id, album_id)
+    cursor.callproc("check_cart_item", (user_id, album_id))
+    in_cart = cursor.fetchone()["in_cart"]
 
-    cursor.execute(cart_cmd)
+    if in_cart == 0:
+        cursor.callproc("add_cart_item", (user_id, album_id))
+    elif in_cart > 0:
+        cursor.callproc("increment_cart", (user_id, album_id))
 
-    if cursor.rowcount == 0:
-        update_cmd = """update cart set quantity = quantity + 1 where 
-            user_id =%s and album_id =%s""" % (user_id, album_id)
-        cursor.execute(update_cmd)
-
-    decrement_stock_cmd = """update albums set stock = albums.stock - 1 from 
-        (select albums.album_id,albums.stock,cart.quantity 
-	    from cart join albums on albums.album_id = cart.album_id 
-	    where cart.user_id = %s and albums.album_id = %s) as sub 
-        where sub.album_id = albums.album_id returning albums.stock as remaining, sub.quantity as cart
-        """ % (user_id, album_id)
-    cursor.execute(decrement_stock_cmd)
+    cursor.callproc("decrement_stock", (user_id, album_id))
     remaining = cursor.fetchone()
     return remaining
 

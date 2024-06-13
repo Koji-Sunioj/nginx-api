@@ -217,11 +217,56 @@ $$
     select  $1, unnest($2),unnest($3);
 $$ language sql;
 
-create function remove_cart_items(in user_id int) 
+create function remove_cart_items(in user_id int,in album_id int default null) 
 returns void as
 $$
-    delete from cart where user_id = $1;
+begin
+    if $2 is null then
+        delete from cart where cart.user_id = $1;
+    else
+        delete from cart where cart.user_id = $1 and cart.album_id = $2;
+    end if;
+end
+$$ language plpgsql;
+
+create function decrement_cart_increment_stock(in user_id int,in album_id int,out cart int,out remaining int) as
+$$
+    with orders_sub as 
+    (update cart set quantity = quantity - 1 where user_id=$1 and album_id=$2
+    returning album_id,quantity) 
+    update albums set stock = stock + 1 from orders_sub
+    where (albums.album_id) in (select album_id from orders_sub) 
+    returning quantity as cart, stock as remaining;
 $$ language sql;
+
+create function check_cart_item(in user_id int,in album_id int,out in_cart int) as
+$$
+    select count(cart.album_id) as in_cart
+    from cart where cart.user_id = $1 and cart.album_id=$2;
+$$ language sql;
+
+create function add_cart_item(in user_id int,in album_id int) 
+returns void as
+$$
+    insert into cart (user_id,album_id,quantity) values ($1, $2, 1); 
+$$ language sql;
+
+create function increment_cart(in user_id int,in album_id int) 
+returns void as
+$$
+    update cart set quantity = quantity + 1 
+    where cart.user_id = $1 and cart.album_id = $2;
+$$ language sql;
+
+create function decrement_stock(in user_id int,in album_id int,out remaining int, out cart int) as
+$$
+    update albums set stock = albums.stock - 1 from 
+    (select albums.album_id,albums.stock,cart.quantity 
+    from cart join albums on albums.album_id = cart.album_id 
+    where cart.user_id = $1 and albums.album_id = $2) as sub 
+    where sub.album_id = albums.album_id returning albums.stock as remaining, sub.quantity as cart;
+$$ language sql;
+
 
 insert into artists (artist_id, name, bio) values
 (100,'Ascension','Black metal band from Tornau vor der Heide, Saxony-Anhalt, Germany.'),
