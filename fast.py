@@ -2,10 +2,11 @@ import re
 import db_functions
 from jose import jwt
 from typing import Union
+from db_functions import cursor
 from dotenv import dotenv_values
 from typing_extensions import Annotated
 from passlib.context import CryptContext
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi import FastAPI, APIRouter, Request, Response, Header, Depends, HTTPException
@@ -29,13 +30,16 @@ async def verify_token(request: Request, authorization: Annotated[str, Header()]
 
 
 @api.get("/artist/{artist_name}")
+@db_functions.tsql
 async def get_artist(artist_name):
     artist_name = re.sub("\-", " ", artist_name).replace("'", "''")
-    artist = db_functions.show_artist(artist_name)
+    cursor.callproc("get_artist", (artist_name,))
+    artist = cursor.fetchone()
     return JSONResponse({"artist": artist}, 200)
 
 
 @api.get("/albums/{artist_name}/{album_name}")
+@db_functions.tsql
 async def get_album(artist_name, album_name, request: Request, authorization: Annotated[Union[str, None], Header()] = None):
     username = None
     if authorization:
@@ -43,21 +47,36 @@ async def get_album(artist_name, album_name, request: Request, authorization: An
         username = request["state"]["sub"]
     artist_name = re.sub("\-", " ", artist_name)
     album_name = re.sub("\-", " ", album_name)
-    album = db_functions.show_album(artist_name, album_name, username)
+    cursor.callproc("get_album", (artist_name, album_name))
+    album = cursor.fetchone()
+
+    if username:
+        cursor.callproc("get_cart_count", (username,
+                        album["album"]["album_id"]))
+        cart = cursor.fetchone()
+        album.update(cart)
+
     return JSONResponse(album, 200)
 
 
 @api.get("/albums")
+@db_functions.tsql
 async def get_albums(page: int = 1, sort: str = "name", direction: str = "ascending", query: str = None):
-    albums = db_functions.show_albums(page, sort, direction, query)
+    albums = {}
+    cursor.callproc("get_pages", (query,))
+    albums["pages"] = cursor.fetchone()["pages"]
+    cursor.callproc("get_albums", (page, sort, direction, query))
+    albums["data"] = cursor.fetchall()
     return JSONResponse({"albums": albums["data"], "pages": albums["pages"]}, 200)
 
 
 @api.post("/sign-in")
+@db_functions.tsql
 async def sign_in(request: Request):
     detail, code, token = "signed in", 200, None
     content = await request.json()
-    user = db_functions.find_user(content["username"], "password")
+    cursor.callproc("get_user", (content["username"], "password"))
+    user = cursor.fetchone()["bm_user"]
     if not user:
         detail, code = "cannot sign in", 401
     else:
@@ -65,7 +84,8 @@ async def sign_in(request: Request):
         if not verified:
             detail, code = "cannot sign in", 401
         else:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
+            print(now)
             expires = now + timedelta(minutes=180)
             jwt_payload = {"sub": user["username"], "iat": now,
                            "exp": expires, "created": str(user["created"])}
@@ -86,41 +106,88 @@ async def check_token(request: Request, response: Response):
 
 
 @api.get("/orders/{username}", dependencies=[Depends(verify_token)])
+@db_functions.tsql
 async def get_orders_cart(username):
-    orders_cart = db_functions.show_orders_cart(username)
+    cursor.callproc("get_orders_and_cart", (username,))
+    orders_cart = cursor.fetchone()
     return JSONResponse(orders_cart, 200)
 
 
 @api.post("/cart/{username}/checkout", dependencies=[Depends(verify_token)])
+@db_functions.tsql
 async def checkout_cart_items(request: Request, username):
-    response = db_functions.checkout_cart(username)
+    cursor.callproc("get_user", (username, "checkout"))
+    data = cursor.fetchone()["bm_user"]
+    user_id, albums = data["user_id"], data["albums"]
+
+    cursor.callproc("create_order", (user_id,))
+    order_id = cursor.fetchone()["order_id"]
+    album_ids = [album["album_id"] for album in albums]
+    quantities = [album["quantity"] for album in albums]
+
+    cursor.callproc("create_dispatch_items", (order_id, album_ids, quantities))
+
+    cursor.callproc("remove_cart_items", (user_id,))
+
+    response = "order %s has been successfully dispatched" % order_id if cursor.rowcount != 0 else "no order to checkout"
     return JSONResponse({"detail": response}, 200)
 
 
 @api.post("/cart/{album_id}/add", dependencies=[Depends(verify_token)])
+@db_functions.tsql
 async def add_cart_item(request: Request, album_id):
-    stock_cart = db_functions.add_cart_item(album_id, request["state"]["sub"])
+    cursor.callproc("get_user", (request["state"]["sub"], "owner"))
+    user_id = cursor.fetchone()["bm_user"]["user_id"]
+
+    cursor.callproc("check_cart_item", (user_id, album_id))
+    in_cart = cursor.fetchone()["in_cart"]
+
+    if in_cart == 0:
+        cursor.callproc("add_cart_item", (user_id, album_id))
+    elif in_cart > 0:
+        cursor.callproc("update_cart_quantity", (user_id, album_id, 1))
+
+    cursor.callproc("update_stock_quantity", (user_id, album_id, -1))
+    stock_cart = cursor.fetchone()
     return JSONResponse(stock_cart, 200)
 
 
 @api.post("/cart/{album_id}/remove", dependencies=[Depends(verify_token)])
+@db_functions.tsql
 async def del_cart_item(request: Request, album_id):
-    stock_cart = db_functions.remove_cart_item(
-        album_id, request["state"]["sub"])
+    cursor.callproc("get_user", (request["state"]["sub"], "owner"))
+    user_id = cursor.fetchone()["bm_user"]["user_id"]
+
+    cursor.callproc("update_cart_quantity", (user_id, album_id, -1))
+    cursor.callproc("update_stock_quantity", (user_id, album_id, 1))
+    stock_cart = cursor.fetchone()
+
+    if stock_cart["cart"] == 0:
+        cursor.callproc("remove_cart_items", (user_id, album_id))
+
     return JSONResponse(stock_cart, 200)
 
 
 @api.get("/users/{username}", dependencies=[Depends(verify_token)])
+@db_functions.tsql
 async def get_user(username):
-    user = db_functions.find_user(username, "cart")
+    cursor.callproc("get_user", (username, "cart"))
+    user = cursor.fetchone()["bm_user"]
     return JSONResponse({"user": jsonable_encoder(user)}, 200)
 
 
 @api.post("/register")
+@db_functions.tsql
 async def register(request: Request):
     content = await request.json()
-    created = db_functions.create_user(
-        content["username"], pwd_context.hash(content["password"]))
+    guest_list = dotenv_values(".env")["GUEST_LIST"].split(",")
+    guest_dict = {key.split(":")[0]: key.split(":")[1] for key in guest_list}
+    if content["username"] not in guest_dict:
+        raise Exception("not on guest list sorry")
+    role = guest_dict[content["username"]]
+    cursor.callproc(
+        'create_user', (content["username"], pwd_context.hash(content["password"]), role))
+    created = cursor.rowcount > 0
     code, detail = (400, "error creating user") if not created else (
         200, "user created")
     return JSONResponse({"detail": detail}, code)
