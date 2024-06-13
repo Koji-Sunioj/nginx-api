@@ -90,7 +90,8 @@ def checkout_cart(username):
 def remove_cart_item(album_id, username):
     user_id = find_user(username, "owner")["user_id"]
 
-    cursor.callproc("decrement_cart_increment_stock", (user_id, album_id))
+    cursor.callproc("update_cart_quantity", (user_id, album_id, -1))
+    cursor.callproc("update_stock_quantity", (user_id, album_id, 1))
     results = cursor.fetchone()
 
     if results["cart"] == 0:
@@ -108,9 +109,9 @@ def add_cart_item(album_id, username):
     if in_cart == 0:
         cursor.callproc("add_cart_item", (user_id, album_id))
     elif in_cart > 0:
-        cursor.callproc("increment_cart", (user_id, album_id))
+        cursor.callproc("update_cart_quantity", (user_id, album_id, 1))
 
-    cursor.callproc("decrement_stock", (user_id, album_id))
+    cursor.callproc("update_stock_quantity", (user_id, album_id, -1))
     remaining = cursor.fetchone()
     return remaining
 
