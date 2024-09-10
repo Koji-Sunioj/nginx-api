@@ -1,9 +1,11 @@
 import re
+import base64
 import db_functions
 from jose import jwt
 from typing import Union
 from db_functions import cursor
 from dotenv import dotenv_values
+from cryptography.fernet import Fernet
 from typing_extensions import Annotated
 from passlib.context import CryptContext
 from datetime import timedelta, datetime, timezone
@@ -79,8 +81,10 @@ async def sign_in(request: Request):
     detail, code, token = "signed in", 200, None
     content = await request.json()
     cursor.callproc("get_user", (content["username"], "password"))
+    print(cursor.rowcount)
+    something = cursor.fetchone()
+    print(something)
     user = cursor.fetchone()["bm_user"]
-    print(user)
     if not user:
         detail, code = "cannot sign in", 401
     else:
@@ -92,11 +96,12 @@ async def sign_in(request: Request):
             expires = now + timedelta(minutes=180)
             jwt_payload = {"sub": user["username"], "iat": now,
                            "exp": expires, "created": str(user["created"])}
-            match user["role"]:
-                case "user":
-                    token = jwt.encode(jwt_payload, fe_secret)
-                case "admin":
-                    token = jwt.encode(jwt_payload, be_secret)
+            if user["role"] == "admin":
+                key = base64.urlsafe_b64encode(be_secret.encode())
+                fernet = Fernet(key)
+                key_role = fernet.encrypt(user["role"].encode())
+                jwt_payload["role"] = key_role.decode(encoding="utf-8")
+            token = jwt.encode(jwt_payload, fe_secret)
 
     return JSONResponse({"detail": detail, "token": token}, code)
 
@@ -116,6 +121,7 @@ async def check_token(request: Request, response: Response):
 @auth.post("/check-token")
 async def check_token(request: Request, response: Response):
     try:
+        print("hey")
         body = await request.body()
         something = jwt.decode(str(body, encoding='utf-8'), key=fe_secret)
         print(something)
