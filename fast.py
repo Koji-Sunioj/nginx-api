@@ -15,8 +15,11 @@ from fastapi import FastAPI, APIRouter, Request, Response, Header, Depends, HTTP
 app = FastAPI()
 api = APIRouter(prefix="/api")
 auth = APIRouter(prefix="/auth")
+admin = APIRouter(prefix="/admin")
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 fe_secret = dotenv_values(".env")["FE_SECRET"]
+be_secret = dotenv_values(".env")["BE_SECRET"]
 
 
 async def verify_token(request: Request, authorization: Annotated[str, Header()]):
@@ -77,6 +80,7 @@ async def sign_in(request: Request):
     content = await request.json()
     cursor.callproc("get_user", (content["username"], "password"))
     user = cursor.fetchone()["bm_user"]
+    print(user)
     if not user:
         detail, code = "cannot sign in", 401
     else:
@@ -85,20 +89,36 @@ async def sign_in(request: Request):
             detail, code = "cannot sign in", 401
         else:
             now = datetime.now(timezone.utc)
-            print(now)
             expires = now + timedelta(minutes=180)
             jwt_payload = {"sub": user["username"], "iat": now,
                            "exp": expires, "created": str(user["created"])}
-            token = jwt.encode(jwt_payload, fe_secret)
+            match user["role"]:
+                case "user":
+                    token = jwt.encode(jwt_payload, fe_secret)
+                case "admin":
+                    token = jwt.encode(jwt_payload, be_secret)
 
     return JSONResponse({"detail": detail, "token": token}, code)
+
+
+@admin.post("/check-token")
+async def check_token(request: Request, response: Response):
+    try:
+        body = await request.body()
+        something = jwt.decode(str(body, encoding='utf-8'), key=fe_secret)
+        print(something)
+        response.status_code = 200
+    except:
+        response.status_code = 401
+    return response
 
 
 @auth.post("/check-token")
 async def check_token(request: Request, response: Response):
     try:
         body = await request.body()
-        jwt.decode(str(body, encoding='utf-8'), key=fe_secret)
+        something = jwt.decode(str(body, encoding='utf-8'), key=fe_secret)
+        print(something)
         response.status_code = 200
     except:
         response.status_code = 401
@@ -194,3 +214,4 @@ async def register(request: Request):
 
 app.include_router(api)
 app.include_router(auth)
+app.include_router(admin)

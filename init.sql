@@ -138,7 +138,7 @@ begin
             from users where users.username=$1;
         when 'password' then
             return query select json_build_object('username',users.username,'password',users.password,
-            'created',users.created) as bm_user
+            'created',users.created,'role',users.role) as bm_user
             from users where username = $1;
         when 'cart' then
             return query select json_build_object('username',users.username,'created',users.created,'orders', 
