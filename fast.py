@@ -34,6 +34,35 @@ async def verify_token(request: Request, authorization: Annotated[str, Header()]
         raise HTTPException(status_code=401, detail="invalid credentials")
 
 
+@admin.post("/check-token")
+async def check_token(request: Request, response: Response):
+    try:
+        body = await request.body()
+        jwt_payload = jwt.decode(str(body, encoding='utf-8'), key=fe_secret)
+        key = base64.urlsafe_b64encode(be_secret.encode())
+        fernet = Fernet(key)
+        role_b64 = jwt_payload["role"].encode(encoding="utf-8")
+        role = fernet.decrypt(role_b64).decode()
+        if role != "admin":
+            raise Exception("unauthorized")
+        response.status_code = 200
+    except Exception as error:
+        print(error)
+        response.status_code = 401
+    return response
+
+
+@auth.post("/check-token")
+async def check_token(request: Request, response: Response):
+    try:
+        body = await request.body()
+        jwt.decode(str(body, encoding='utf-8'), key=fe_secret)
+        response.status_code = 200
+    except:
+        response.status_code = 401
+    return response
+
+
 @api.get("/artist/{artist_name}")
 @db_functions.tsql
 async def get_artist(artist_name):
@@ -78,57 +107,31 @@ async def get_albums(page: int = 1, sort: str = "name", direction: str = "ascend
 @api.post("/sign-in")
 @db_functions.tsql
 async def sign_in(request: Request):
-    detail, code, token = "signed in", 200, None
+    verified = False
     content = await request.json()
     cursor.callproc("get_user", (content["username"], "password"))
-    print(cursor.rowcount)
-    something = cursor.fetchone()
-    print(something)
-    user = cursor.fetchone()["bm_user"]
-    if not user:
-        detail, code = "cannot sign in", 401
-    else:
+
+    try:
+        user = cursor.fetchone()["bm_user"]
         verified = pwd_context.verify(content["password"], user["password"])
-        if not verified:
-            detail, code = "cannot sign in", 401
-        else:
-            now = datetime.now(timezone.utc)
-            expires = now + timedelta(minutes=180)
-            jwt_payload = {"sub": user["username"], "iat": now,
-                           "exp": expires, "created": str(user["created"])}
-            if user["role"] == "admin":
-                key = base64.urlsafe_b64encode(be_secret.encode())
-                fernet = Fernet(key)
-                key_role = fernet.encrypt(user["role"].encode())
-                jwt_payload["role"] = key_role.decode(encoding="utf-8")
-            token = jwt.encode(jwt_payload, fe_secret)
-
-    return JSONResponse({"detail": detail, "token": token}, code)
-
-
-@admin.post("/check-token")
-async def check_token(request: Request, response: Response):
-    try:
-        body = await request.body()
-        something = jwt.decode(str(body, encoding='utf-8'), key=fe_secret)
-        print(something)
-        response.status_code = 200
     except:
-        response.status_code = 401
-    return response
+        verified = False
 
+    if not verified:
+        return JSONResponse({"detail": "cannot sign in"}, 401)
 
-@auth.post("/check-token")
-async def check_token(request: Request, response: Response):
-    try:
-        print("hey")
-        body = await request.body()
-        something = jwt.decode(str(body, encoding='utf-8'), key=fe_secret)
-        print(something)
-        response.status_code = 200
-    except:
-        response.status_code = 401
-    return response
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(minutes=180)
+    jwt_payload = {"sub": user["username"], "iat": now,
+                   "exp": expires, "created": str(user["created"])}
+    if user["role"] == "admin":
+        key = base64.urlsafe_b64encode(be_secret.encode())
+        fernet = Fernet(key)
+        key_role = fernet.encrypt(user["role"].encode())
+        jwt_payload["role"] = key_role.decode(encoding="utf-8")
+    token = jwt.encode(jwt_payload, fe_secret)
+
+    return JSONResponse({"detail": "signed in", "token": token}, 200)
 
 
 @api.get("/orders/{username}", dependencies=[Depends(verify_token)])
@@ -152,7 +155,6 @@ async def checkout_cart_items(request: Request, username):
     quantities = [album["quantity"] for album in albums]
 
     cursor.callproc("create_dispatch_items", (order_id, album_ids, quantities))
-
     cursor.callproc("remove_cart_items", (user_id,))
 
     response = "order %s has been successfully dispatched" % order_id if cursor.rowcount != 0 else "no order to checkout"
