@@ -36,9 +36,11 @@ async def verify_token(request: Request, authorization: Annotated[str, Header()]
 
 @admin.post("/check-token")
 async def check_token(request: Request, response: Response):
+    print("yo")
     try:
-        body = await request.body()
-        jwt_payload = jwt.decode(str(body, encoding='utf-8'), key=fe_secret)
+        headers = request.headers
+        token = headers["cookie"].split("=")[1]
+        jwt_payload = jwt.decode(token, key=fe_secret)
         key = base64.urlsafe_b64encode(be_secret.encode())
         fernet = Fernet(key)
         role_b64 = jwt_payload["role"].encode(encoding="utf-8")
@@ -55,10 +57,12 @@ async def check_token(request: Request, response: Response):
 @auth.post("/check-token")
 async def check_token(request: Request, response: Response):
     try:
-        body = await request.body()
-        jwt.decode(str(body, encoding='utf-8'), key=fe_secret)
+        headers = request.headers
+        token = headers["cookie"].split("=")[1]
+        jwt.decode(token, key=fe_secret)
         response.status_code = 200
-    except:
+    except Exception as error:
+        print(error)
         response.status_code = 401
     return response
 
