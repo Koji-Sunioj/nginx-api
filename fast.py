@@ -36,11 +36,10 @@ async def verify_token(request: Request, authorization: Annotated[str, Header()]
 
 @admin.post("/check-token")
 async def check_token(request: Request, response: Response):
-    print("yo")
     try:
         headers = request.headers
-        token = headers["cookie"].split("=")[1]
-        jwt_payload = jwt.decode(token, key=fe_secret)
+        token_pattern = re.search(r"token=(.+?)(?=;|$)", headers["cookie"])
+        jwt_payload = jwt.decode(token_pattern.group(1), key=fe_secret)
         key = base64.urlsafe_b64encode(be_secret.encode())
         fernet = Fernet(key)
         role_b64 = jwt_payload["role"].encode(encoding="utf-8")
@@ -54,12 +53,21 @@ async def check_token(request: Request, response: Response):
     return response
 
 
+@api.get("/artists")
+@db_functions.tsql
+async def check_token(request: Request, response: Response):
+    command = "select name from artists;"
+    cursor.execute(command)
+    artists = cursor.fetchall()
+    return JSONResponse({"artists": artists})
+
+
 @auth.post("/check-token")
 async def check_token(request: Request, response: Response):
     try:
         headers = request.headers
-        token = headers["cookie"].split("=")[1]
-        jwt.decode(token, key=fe_secret)
+        token_pattern = re.search(r"token=(.+?)(?=;|$)", headers["cookie"])
+        jwt.decode(token_pattern.group(1), key=fe_secret)
         response.status_code = 200
     except Exception as error:
         print(error)
