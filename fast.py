@@ -1,65 +1,40 @@
 import re
-import base64
 import db_functions
 from jose import jwt
 from typing import Union
 from db_functions import cursor
 from dotenv import dotenv_values
-from cryptography.fernet import Fernet
 from typing_extensions import Annotated
 from passlib.context import CryptContext
-from datetime import timedelta, datetime, timezone
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from fastapi import FastAPI, APIRouter, Request, Response, Header, Depends, HTTPException
+from utils import verify_token, verify_admin_token, decode_role, encode_role
+from datetime import timedelta, datetime, timezone
+from fastapi import FastAPI, APIRouter, Request, Response, Header, Depends
 
 
 app = FastAPI()
 api = APIRouter(prefix="/api")
 auth = APIRouter(prefix="/auth")
-admin = APIRouter(prefix="/admin")
+admin = APIRouter(prefix="/api/admin",
+                  dependencies=[Depends(verify_admin_token)])
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 fe_secret = dotenv_values(".env")["FE_SECRET"]
-be_secret = dotenv_values(".env")["BE_SECRET"]
 
 
-async def verify_token(request: Request, authorization: Annotated[str, Header()]):
-    try:
-        token = authorization.split(" ")[1]
-        creds = jwt.decode(token, key=fe_secret)
-        request.state.sub = creds["sub"]
-    except Exception as error:
-        print(error)
-        raise HTTPException(status_code=401, detail="invalid credentials")
-
-
-@admin.post("/check-token")
-async def check_token(request: Request, response: Response):
+@auth.post("/check-token/admin")
+async def check_admin_token(request: Request, response: Response):
     try:
         headers = request.headers
         token_pattern = re.search(r"token=(.+?)(?=;|$)", headers["cookie"])
         jwt_payload = jwt.decode(token_pattern.group(1), key=fe_secret)
-        key = base64.urlsafe_b64encode(be_secret.encode())
-        fernet = Fernet(key)
-        role_b64 = jwt_payload["role"].encode(encoding="utf-8")
-        role = fernet.decrypt(role_b64).decode()
-        if role != "admin":
-            raise Exception("unauthorized")
+        decode_role(jwt_payload["role"])
         response.status_code = 200
     except Exception as error:
         print(error)
         response.status_code = 401
     return response
-
-
-@api.get("/artists")
-@db_functions.tsql
-async def check_token(request: Request, response: Response):
-    command = "select name from artists;"
-    cursor.execute(command)
-    artists = cursor.fetchall()
-    return JSONResponse({"artists": artists})
 
 
 @auth.post("/check-token")
@@ -73,6 +48,15 @@ async def check_token(request: Request, response: Response):
         print(error)
         response.status_code = 401
     return response
+
+
+@admin.get("/artists")
+@db_functions.tsql
+async def admin_get_artists():
+    command = "select name from artists order by name asc;"
+    cursor.execute(command)
+    artists = cursor.fetchall()
+    return JSONResponse({"artists": artists})
 
 
 @api.get("/artist/{artist_name}")
@@ -137,10 +121,7 @@ async def sign_in(request: Request):
     jwt_payload = {"sub": user["username"], "iat": now,
                    "exp": expires, "created": str(user["created"])}
     if user["role"] == "admin":
-        key = base64.urlsafe_b64encode(be_secret.encode())
-        fernet = Fernet(key)
-        key_role = fernet.encrypt(user["role"].encode())
-        jwt_payload["role"] = key_role.decode(encoding="utf-8")
+        jwt_payload["role"] = encode_role(user["role"])
     token = jwt.encode(jwt_payload, fe_secret)
 
     return JSONResponse({"detail": "signed in", "token": token}, 200)
