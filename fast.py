@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from utils import verify_token, verify_admin_token, decode_role, encode_role
 from datetime import timedelta, datetime, timezone
-from fastapi import FastAPI, APIRouter, Request, Response, Header, Depends
+from fastapi import FastAPI, APIRouter, Request, Response, Header, Depends, Form
 
 
 app = FastAPI()
@@ -48,6 +48,27 @@ async def check_token(request: Request, response: Response):
         print(error)
         response.status_code = 401
     return response
+
+
+@admin.post("/albums")
+async def create_album(request: Request):
+    form = await request.form()
+
+    artist_cmd = "select artist_id from artists where name=%s"
+    artist_params = (form["artist"],)
+    cursor.execute(artist_cmd, artist_params)
+    artist_id = cursor.fetchone()
+    print(artist_id)
+
+    print(form["photo"].filename)
+    new_photo = open("/var/www/blackmetal/common/" +
+                     form["photo"].filename, "wb")
+    new_photo.write(form["photo"].file.read())
+    new_photo.close()
+
+    for key in form.keys():
+        print(key, form[key])
+    return {"hey": "fucker"}
 
 
 @admin.get("/artists")
