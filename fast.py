@@ -8,7 +8,7 @@ from typing_extensions import Annotated
 from passlib.context import CryptContext
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from utils import verify_token, verify_admin_token, decode_role, encode_role
+from utils import verify_token, verify_admin_token, decode_role, encode_role, insert_songs_cmd
 from datetime import timedelta, datetime, timezone
 from fastapi import FastAPI, APIRouter, Request, Response, Header, Depends, Form
 
@@ -51,24 +51,34 @@ async def check_token(request: Request, response: Response):
 
 
 @admin.post("/albums")
+@db_functions.tsql
 async def create_album(request: Request):
     form = await request.form()
 
     artist_cmd = "select artist_id from artists where name=%s"
     artist_params = (form["artist"],)
     cursor.execute(artist_cmd, artist_params)
-    artist_id = cursor.fetchone()
-    print(artist_id)
+    artist_id = cursor.fetchone()["artist_id"]
 
-    print(form["photo"].filename)
-    new_photo = open("/var/www/blackmetal/common/" +
-                     form["photo"].filename, "wb")
-    new_photo.write(form["photo"].file.read())
+    filename, content = form["photo"].filename, form["photo"].file.read()
+    new_photo = open("/var/www/blackmetal/common/%s" % filename, "wb")
+    new_photo.write(content)
     new_photo.close()
 
-    for key in form.keys():
-        print(key, form[key])
-    return {"hey": "fucker"}
+    insert_album_cmd = "insert into albums (title,release_year,stock,price,\
+        photo,artist_id) values (%s,%s,%s,%s,%s,%s) returning albums.album_id;"
+
+    insert_album_params = (form["title"], form["release_year"], form["stock"],
+                           form["price"], filename, artist_id)
+
+    cursor.execute(insert_album_cmd, insert_album_params)
+    album_id = cursor.fetchone()["album_id"]
+
+    insert_songs = insert_songs_cmd(form, album_id)
+    cursor.execute(insert_songs)
+
+    detail = "album %s by %s created" % (form["title"], form["artist"])
+    return JSONResponse({"detail": detail}, 200)
 
 
 @admin.get("/artists")

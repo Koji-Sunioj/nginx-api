@@ -1,4 +1,5 @@
 
+import re
 import base64
 from jose import jwt
 from dotenv import dotenv_values
@@ -8,6 +9,30 @@ from fastapi import Request, Header, HTTPException
 
 fe_secret = dotenv_values(".env")["FE_SECRET"]
 be_secret = dotenv_values(".env")["BE_SECRET"]
+
+
+def insert_songs_cmd(form, album_id):
+    song_pattern = r"^(?:track|duration|song)_[0-9]{1,2}$"
+    indexes = [int(key.split("_")[1])
+               for key in form.keys() if re.search(song_pattern, key)]
+    song_indexes = list(set(indexes))
+
+    songs = []
+    for index in song_indexes:
+        duration = "null"
+        if len(form[f"duration_{index}"]) > 0:
+            duration_vals = form[f"duration_{index}"].split(":")
+            duration = int(duration_vals[0]) * 60 + int(duration_vals[1])
+
+        song = {"track": form[f"track_{index}"],
+                "duration": duration, "song": form[f"song_{index}"]}
+        songs.append(song)
+
+    insert_songs = "insert into songs (album_id,track,duration,song) values\n%s;"
+    inserts = ["(%s,%s,%s,'%s')" % (album_id, x["track"],
+                                    x["duration"], x["song"]) for x in songs]
+    insert_songs_cmd = insert_songs % ",\n".join(inserts)
+    return insert_songs_cmd
 
 
 def encode_role(role):
