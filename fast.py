@@ -55,7 +55,12 @@ async def check_token(request: Request, response: Response):
 async def create_album(request: Request):
     form = await request.form()
 
-    artist_cmd = "select artist_id from artists where name=%s"
+    cursor.callproc(
+        "get_album", (form["artist"].lower(), form["title"].lower()))
+    if cursor.rowcount > 0:
+        return JSONResponse({"detail": "that album exists"}, 409)
+
+    artist_cmd = "select artist_id from artists where name=%s;"
     artist_params = (form["artist"],)
     cursor.execute(artist_cmd, artist_params)
     artist_id = cursor.fetchone()["artist_id"]
