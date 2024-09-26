@@ -57,24 +57,21 @@ async def create_album(request: Request):
 
     cursor.callproc(
         "get_album", (form["artist"].lower(), form["title"].lower()))
-    if cursor.rowcount > 0:
-        return JSONResponse({"detail": "that album exists"}, 409)
+    album = cursor.fetchone()["album"]
 
-    artist_cmd = "select artist_id from artists where name=%s;"
-    artist_params = (form["artist"],)
-    cursor.execute(artist_cmd, artist_params)
-    artist_id = cursor.fetchone()["artist_id"]
+    if album != None:
+        return JSONResponse({"detail": "that album exists"}, 409)
 
     filename, content = form["photo"].filename, form["photo"].file.read()
     new_photo = open("/var/www/blackmetal/common/%s" % filename, "wb")
     new_photo.write(content)
     new_photo.close()
 
-    insert_album_cmd = "insert into albums (title,release_year,stock,price,\
-        photo,artist_id) values (%s,%s,%s,%s,%s,%s) returning albums.album_id;"
+    insert_album_cmd = "insert into albums (title,release_year,price,\
+        photo,artist_id) values (%s,%s,%s,%s,%s) returning albums.album_id;"
 
-    insert_album_params = (form["title"], form["release_year"], form["stock"],
-                           form["price"], filename, artist_id)
+    insert_album_params = (form["title"], form["release_year"],
+                           form["price"], filename, form["artist"])
 
     cursor.execute(insert_album_cmd, insert_album_params)
     album_id = cursor.fetchone()["album_id"]
@@ -82,14 +79,14 @@ async def create_album(request: Request):
     insert_songs = insert_songs_cmd(form, album_id)
     cursor.execute(insert_songs)
 
-    detail = "album %s by %s created" % (form["title"], form["artist"])
+    detail = "album %s created" % form["title"]
     return JSONResponse({"detail": detail}, 200)
 
 
 @admin.get("/artists")
 @db_functions.tsql
 async def admin_get_artists():
-    command = "select name from artists order by name asc;"
+    command = "select artist_id,name from artists order by name asc;"
     cursor.execute(command)
     artists = cursor.fetchall()
     return JSONResponse({"artists": artists})

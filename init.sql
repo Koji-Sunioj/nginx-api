@@ -14,10 +14,11 @@ create table albums(
     album_id serial primary key,
     title varchar,
     release_year smallint,
-    stock smallint check (stock >= 0),
+    stock smallint check (stock >= 0) default 0,
     price decimal(4,2),
     photo varchar,
     artist_id smallint,
+    created timestamp default timezone('utc', now()),
     foreign key (artist_id) references artists (artist_id)
 );
 
@@ -39,7 +40,7 @@ create table songs(
     duration smallint,
     song varchar,
     primary key(track, album_id),
-    foreign key (album_id) references albums(album_id)
+    foreign key (album_id) references albums(album_id) on delete cascade
 );
 
 
