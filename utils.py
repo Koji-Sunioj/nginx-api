@@ -52,10 +52,23 @@ def decode_role(jwt_role):
         raise Exception("unauthorized")
 
 
-async def verify_admin_token(request: Request, authorization: Annotated[str, Header()]):
+async def something(request: Request):
     try:
-        token = authorization.split(" ")[1]
-        jwt_payload = jwt.decode(token, key=fe_secret)
+        headers = request.headers
+        token_pattern = re.search(r"token=(.+?)(?=;|$)", headers["cookie"])
+        jwt_payload = jwt.decode(token_pattern.group(1), key=fe_secret)
+        username = jwt_payload["sub"]
+        print(username)
+        return username
+    except:
+        return None
+
+
+async def verify_admin_token(request: Request):
+    try:
+        headers = request.headers
+        token_pattern = re.search(r"token=(.+?)(?=;|$)", headers["cookie"])
+        jwt_payload = jwt.decode(token_pattern.group(1), key=fe_secret)
         decode_role(jwt_payload["role"])
         request.state.sub = jwt_payload["sub"]
     except Exception as error:
@@ -63,10 +76,12 @@ async def verify_admin_token(request: Request, authorization: Annotated[str, Hea
         raise HTTPException(status_code=401, detail="invalid credentials")
 
 
-async def verify_token(request: Request, authorization: Annotated[str, Header()]):
+async def verify_token(request: Request):
+    print(request.url.path)
     try:
-        token = authorization.split(" ")[1]
-        jwt_payload = jwt.decode(token, key=fe_secret)
+        headers = request.headers
+        token_pattern = re.search(r"token=(.+?)(?=;|$)", headers["cookie"])
+        jwt_payload = jwt.decode(token_pattern.group(1), key=fe_secret)
         request.state.sub = jwt_payload["sub"]
     except Exception as error:
         print(error)

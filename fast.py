@@ -8,7 +8,7 @@ from typing_extensions import Annotated
 from passlib.context import CryptContext
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from utils import verify_token, verify_admin_token, decode_role, encode_role, insert_songs_cmd
+from utils import verify_token, verify_admin_token, decode_role, encode_role, insert_songs_cmd, something
 from datetime import timedelta, datetime, timezone
 from fastapi import FastAPI, APIRouter, Request, Response, Header, Depends, Form
 
@@ -103,15 +103,14 @@ async def get_artist(artist_name):
 
 @api.get("/albums/{artist_name}/{album_name}")
 @db_functions.tsql
-async def get_album(artist_name, album_name, request: Request, authorization: Annotated[Union[str, None], Header()] = None):
-    username = None
-    if authorization:
-        await verify_token(request, authorization)
-        username = request["state"]["sub"]
+async def get_album(artist_name, album_name, request: Request):
+
     artist_name = re.sub("\-", " ", artist_name)
     album_name = re.sub("\-", " ", album_name)
     cursor.callproc("get_album", (artist_name, album_name))
     album = cursor.fetchone()
+
+    username = await something(request)
 
     if username:
         cursor.callproc("get_cart_count", (username,
@@ -157,21 +156,24 @@ async def sign_in(request: Request):
         jwt_payload["role"] = encode_role(user["role"])
     token = jwt.encode(jwt_payload, fe_secret)
 
-    return JSONResponse({"detail": "signed in", "token": token}, 200)
+    token_string = "token=%s; Path=/; SameSite=Lax" % token
+    headers = {"Set-Cookie": token_string}
+
+    return JSONResponse(content={"detail": "signed in"}, headers=headers, status_code=200)
 
 
-@api.get("/orders/{username}", dependencies=[Depends(verify_token)])
+@api.get("/orders", dependencies=[Depends(verify_token)])
 @db_functions.tsql
-async def get_orders_cart(username):
-    cursor.callproc("get_orders_and_cart", (username,))
+async def get_orders_cart(request: Request):
+    cursor.callproc("get_orders_and_cart", (request.state.sub,))
     orders_cart = cursor.fetchone()
     return JSONResponse(orders_cart, 200)
 
 
-@api.post("/cart/{username}/checkout", dependencies=[Depends(verify_token)])
+@api.post("/cart/checkout", dependencies=[Depends(verify_token)])
 @db_functions.tsql
-async def checkout_cart_items(request: Request, username):
-    cursor.callproc("get_user", (username, "checkout"))
+async def checkout_cart_items(request: Request):
+    cursor.callproc("get_user", (request.state.sub, "checkout"))
     data = cursor.fetchone()["bm_user"]
     user_id, albums = data["user_id"], data["albums"]
 
@@ -209,6 +211,8 @@ async def add_cart_item(request: Request, album_id):
 @api.post("/cart/{album_id}/remove", dependencies=[Depends(verify_token)])
 @db_functions.tsql
 async def del_cart_item(request: Request, album_id):
+    print(request.state.sub)
+    print(album_id)
     cursor.callproc("get_user", (request["state"]["sub"], "owner"))
     user_id = cursor.fetchone()["bm_user"]["user_id"]
 
@@ -222,10 +226,10 @@ async def del_cart_item(request: Request, album_id):
     return JSONResponse(stock_cart, 200)
 
 
-@api.get("/users/{username}", dependencies=[Depends(verify_token)])
+@api.get("/user", dependencies=[Depends(verify_token)])
 @db_functions.tsql
-async def get_user(username):
-    cursor.callproc("get_user", (username, "cart"))
+async def get_user(request: Request):
+    cursor.callproc("get_user", (request.state.sub, "cart"))
     user = cursor.fetchone()["bm_user"]
     return JSONResponse({"user": jsonable_encoder(user)}, 200)
 
