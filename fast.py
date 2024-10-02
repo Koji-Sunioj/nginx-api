@@ -1,16 +1,14 @@
 import re
 import db_functions
 from jose import jwt
-from typing import Union
 from db_functions import cursor
 from dotenv import dotenv_values
-from typing_extensions import Annotated
 from passlib.context import CryptContext
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from utils import verify_token, verify_admin_token, decode_role, encode_role, insert_songs_cmd, something
+from utils import verify_token, verify_admin_token, decode_role, encode_role, insert_songs_cmd, decode_token
 from datetime import timedelta, datetime, timezone
-from fastapi import FastAPI, APIRouter, Request, Response, Header, Depends, Form
+from fastapi import FastAPI, APIRouter, Request, Response, Depends
 
 
 app = FastAPI()
@@ -26,9 +24,7 @@ fe_secret = dotenv_values(".env")["FE_SECRET"]
 @auth.post("/check-token/admin")
 async def check_admin_token(request: Request, response: Response):
     try:
-        headers = request.headers
-        token_pattern = re.search(r"token=(.+?)(?=;|$)", headers["cookie"])
-        jwt_payload = jwt.decode(token_pattern.group(1), key=fe_secret)
+        jwt_payload = await decode_token(request)
         decode_role(jwt_payload["role"])
         response.status_code = 200
     except Exception as error:
@@ -40,9 +36,7 @@ async def check_admin_token(request: Request, response: Response):
 @auth.post("/check-token")
 async def check_token(request: Request, response: Response):
     try:
-        headers = request.headers
-        token_pattern = re.search(r"token=(.+?)(?=;|$)", headers["cookie"])
-        jwt.decode(token_pattern.group(1), key=fe_secret)
+        await decode_token(request)
         response.status_code = 200
     except Exception as error:
         print(error)
@@ -104,19 +98,20 @@ async def get_artist(artist_name):
 @api.get("/albums/{artist_name}/{album_name}")
 @db_functions.tsql
 async def get_album(artist_name, album_name, request: Request):
-
     artist_name = re.sub("\-", " ", artist_name)
     album_name = re.sub("\-", " ", album_name)
     cursor.callproc("get_album", (artist_name, album_name))
     album = cursor.fetchone()
 
-    username = await something(request)
-
-    if username:
-        cursor.callproc("get_cart_count", (username,
-                        album["album"]["album_id"]))
-        cart = cursor.fetchone()
-        album.update(cart)
+    try:
+        if "cookie" in request.headers:
+            jwt_payload = await decode_token(request)
+            cursor.callproc("get_cart_count", (jwt_payload["sub"],
+                            album["album"]["album_id"]))
+            cart = cursor.fetchone()
+            album.update(cart)
+    except:
+        pass
 
     return JSONResponse(album, 200)
 
@@ -211,8 +206,6 @@ async def add_cart_item(request: Request, album_id):
 @api.post("/cart/{album_id}/remove", dependencies=[Depends(verify_token)])
 @db_functions.tsql
 async def del_cart_item(request: Request, album_id):
-    print(request.state.sub)
-    print(album_id)
     cursor.callproc("get_user", (request["state"]["sub"], "owner"))
     user_id = cursor.fetchone()["bm_user"]["user_id"]
 

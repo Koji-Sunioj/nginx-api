@@ -4,8 +4,7 @@ import base64
 from jose import jwt
 from dotenv import dotenv_values
 from cryptography.fernet import Fernet
-from typing_extensions import Annotated
-from fastapi import Request, Header, HTTPException
+from fastapi import Request, HTTPException
 
 fe_secret = dotenv_values(".env")["FE_SECRET"]
 be_secret = dotenv_values(".env")["BE_SECRET"]
@@ -52,23 +51,16 @@ def decode_role(jwt_role):
         raise Exception("unauthorized")
 
 
-async def something(request: Request):
-    try:
-        headers = request.headers
-        token_pattern = re.search(r"token=(.+?)(?=;|$)", headers["cookie"])
-        jwt_payload = jwt.decode(token_pattern.group(1), key=fe_secret)
-        username = jwt_payload["sub"]
-        print(username)
-        return username
-    except:
-        return None
+async def decode_token(request: Request):
+    headers = request.headers
+    token_pattern = re.search(r"token=(.+?)(?=;|$)", headers["cookie"])
+    jwt_payload = jwt.decode(token_pattern.group(1), key=fe_secret)
+    return jwt_payload
 
 
 async def verify_admin_token(request: Request):
     try:
-        headers = request.headers
-        token_pattern = re.search(r"token=(.+?)(?=;|$)", headers["cookie"])
-        jwt_payload = jwt.decode(token_pattern.group(1), key=fe_secret)
+        jwt_payload = await decode_token(request)
         decode_role(jwt_payload["role"])
         request.state.sub = jwt_payload["sub"]
     except Exception as error:
@@ -77,11 +69,8 @@ async def verify_admin_token(request: Request):
 
 
 async def verify_token(request: Request):
-    print(request.url.path)
     try:
-        headers = request.headers
-        token_pattern = re.search(r"token=(.+?)(?=;|$)", headers["cookie"])
-        jwt_payload = jwt.decode(token_pattern.group(1), key=fe_secret)
+        jwt_payload = await decode_token(request)
         request.state.sub = jwt_payload["sub"]
     except Exception as error:
         print(error)
