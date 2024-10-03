@@ -118,7 +118,9 @@ async def get_album(artist_name, album_name, request: Request):
 
 @api.get("/albums")
 @db_functions.tsql
-async def get_albums(page: int = 1, sort: str = "name", direction: str = "ascending", query: str = None):
+async def get_albums(request: Request, page: int = 1, sort: str = "name", direction: str = "ascending", query: str = None):
+    print(request.headers["referer"])
+    print(request.receive)
     albums = {}
     cursor.callproc("get_pages", (query,))
     albums["pages"] = cursor.fetchone()["pages"]

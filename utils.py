@@ -49,6 +49,7 @@ def decode_role(jwt_role):
     role = fernet.decrypt(role_b64).decode()
     if role != "admin":
         raise Exception("unauthorized")
+    return role
 
 
 async def decode_token(request: Request):
@@ -61,8 +62,9 @@ async def decode_token(request: Request):
 async def verify_admin_token(request: Request):
     try:
         jwt_payload = await decode_token(request)
-        decode_role(jwt_payload["role"])
+        request.state.role = decode_role(jwt_payload["role"])
         request.state.sub = jwt_payload["sub"]
+        print(request.state.role)
     except Exception as error:
         print(error)
         raise HTTPException(status_code=401, detail="invalid credentials")

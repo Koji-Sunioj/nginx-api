@@ -176,12 +176,13 @@ $$ language plpgsql;
 
 create function get_albums(in page int,in sort varchar,in direction varchar,in query varchar default null)
 returns table (
-	name varchar, 
-    title varchar,
-    release_year smallint, 
     photo varchar,
-    stock smallint, 
-    price double precision
+    title varchar,
+    name varchar, 
+	stock smallint, 
+    release_year smallint, 
+    price double precision,
+    created varchar
 ) as 
 $$
 declare 
@@ -189,8 +190,8 @@ new_offset smallint := ($1 - 1) * 8;
 new_query varchar := ' where lower(name) like lower(''%' || $4 || '%'') or lower(title) like lower(''%' || $4 || '%'')';
 begin  
     return query execute '
-    select artists.name, albums.title, albums.release_year, 
-    albums.photo, albums.stock,albums.price::float
+    select albums.photo,albums.title,artists.name,albums.stock, albums.release_year, 
+    albums.price::float, albums.created::timestamptz::varchar
     from albums
     join artists on artists.artist_id = albums.artist_id'
     || case when $4 is not null then new_query else ' ' end || 
