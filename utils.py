@@ -64,7 +64,6 @@ async def verify_admin_token(request: Request):
         jwt_payload = await decode_token(request)
         request.state.role = decode_role(jwt_payload["role"])
         request.state.sub = jwt_payload["sub"]
-        print(request.state.role)
     except Exception as error:
         print(error)
         raise HTTPException(status_code=401, detail="invalid credentials")

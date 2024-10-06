@@ -191,7 +191,7 @@ new_query varchar := ' where lower(name) like lower(''%' || $4 || '%'') or lower
 begin  
     return query execute '
     select albums.photo,albums.title,artists.name,albums.stock, albums.release_year, 
-    albums.price::float, albums.created::timestamptz::varchar
+    albums.price::float, albums.created::varchar
     from albums
     join artists on artists.artist_id = albums.artist_id'
     || case when $4 is not null then new_query else ' ' end || 
