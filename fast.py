@@ -48,39 +48,83 @@ async def check_token(request: Request, response: Response):
 @db_functions.tsql
 async def create_album(request: Request):
     form = await request.form()
+    response = {"detail": None}
 
-    cursor.callproc(
-        "get_album", (form["artist"].lower(), form["title"].lower()))
-    album = cursor.fetchone()["album"]
+    match form['action']:
+        case "edit":
+            cursor.callproc(
+                "get_album", ("id", None, None, form['album_id']))
+            album = cursor.fetchone()["album"]
+            fields_to_change = [field for field in [
+                "title", "release_year", "price", "artist_id"] if str(album[field]) != form[field]]
 
-    if album != None:
-        return JSONResponse({"detail": "that album exists"}, 409)
+            if len(fields_to_change) > 0:
+                set_cmds = [
+                    f"{field} = %s" for field in fields_to_change]
 
-    filename, content = form["photo"].filename, form["photo"].file.read()
-    new_photo = open("/var/www/blackmetal/common/%s" % filename, "wb")
-    new_photo.write(content)
-    new_photo.close()
+                set_cmds = ", ".join(set_cmds)
 
-    insert_album_cmd = "insert into albums (title,release_year,price,\
-        photo,artist_id) values (%s,%s,%s,%s,%s) returning albums.album_id;"
+                update_params = [form[field] for field in fields_to_change]
+                update_params.append(form['album_id'])
 
-    insert_album_params = (form["title"], form["release_year"],
-                           form["price"], filename, form["artist"])
+                update_album_cmd = f"""with updated as (update albums set {set_cmds} where album_id = %s returning * ) 
+                    select title, name from updated join artists on artists.artist_id = updated.artist_id;"""
 
-    cursor.execute(insert_album_cmd, insert_album_params)
-    album_id = cursor.fetchone()["album_id"]
+                cursor.execute(update_album_cmd, update_params)
 
-    insert_songs = insert_songs_cmd(form, album_id)
-    cursor.execute(insert_songs)
+                updated_album = cursor.fetchone()
 
-    detail = "album %s created" % form["title"]
-    return JSONResponse({"detail": detail}, 200)
+                response.update(
+                    {"title": updated_album["title"], "name": updated_album["name"]})
+                response["detail"] = "album %s updated" % updated_album["title"]
+
+            else:
+                response["detail"] = "there was nothing to update"
+
+        case "new":
+            album_cmd = "select album_id from albums join artists on artists.artist_id = albums.artist_id \
+                where title=%s and artists.artist_id = %s;"
+
+            """ cursor.callproc(
+                "get_album", ("from-uri", form["name"].lower(), form["title"].lower(), None))
+            album = cursor.fetchone()["album"] """
+
+            cursor.execute(album_cmd, (form["title"], form["artist_id"]))
+            album = cursor.fetchone()
+
+            if album != None:
+                return JSONResponse({"detail": "that album exists"}, 409)
+
+            filename, content = form["photo"].filename, form["photo"].file.read(
+            )
+            new_photo = open("/var/www/blackmetal/common/%s" % filename, "wb")
+            new_photo.write(content)
+            new_photo.close()
+
+            insert_album_cmd = "with inserted as (insert into albums (title,release_year,price,\
+                photo,artist_id) values (%s,%s,%s,%s,%s) returning *) select album_id,name,title \
+                    from inserted join artists on artists.artist_id = inserted.artist_id;"
+
+            insert_album_params = (
+                form["title"], form["release_year"], form["price"], filename, form["artist_id"])
+
+            cursor.execute(insert_album_cmd, insert_album_params)
+            inserted = cursor.fetchone()
+
+            insert_songs = insert_songs_cmd(form, inserted["album_id"])
+            cursor.execute(insert_songs)
+
+            response.update(
+                {"title": inserted["title"], "name": inserted["name"]})
+            response["detail"] = "album %s created" % inserted["title"]
+
+    return JSONResponse(response, 200)
 
 
 @admin.get("/artists")
 @db_functions.tsql
 async def admin_get_artists():
-    command = "select artist_id,name from artists order by name asc;"
+    command = "select name,artist_id from artists order by name asc;"
     cursor.execute(command)
     artists = cursor.fetchall()
     return JSONResponse({"artists": artists})
@@ -100,7 +144,8 @@ async def get_artist(artist_name):
 async def get_album(artist_name, album_name, request: Request):
     artist_name = re.sub("\-", " ", artist_name)
     album_name = re.sub("\-", " ", album_name)
-    cursor.callproc("get_album", (artist_name, album_name))
+    print(album_name)
+    cursor.callproc("get_album", ("from-uri", artist_name, album_name, None))
     album = cursor.fetchone()
     album["cart"] = None
 
@@ -113,6 +158,8 @@ async def get_album(artist_name, album_name, request: Request):
             album.update(cart)
     except:
         pass
+
+    print(album)
 
     return JSONResponse(album, 200)
 

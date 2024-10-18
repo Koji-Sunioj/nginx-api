@@ -78,16 +78,30 @@ grant usage on schema public to bm_admin;
 grant select, insert, update, delete on all tables in schema public to bm_admin;
 grant usage, select on all sequences in schema public to bm_admin;
 
-create function get_album(in artist_name varchar, in album_name varchar,out album json, out songs json) as
+create function get_album(in id_type varchar,in artist_name varchar, in album_name varchar,in artist_id int,out album json, out songs json) 
+returns setof record as 
 $$
-    select json_build_object('album_id',albums.album_id,'name', name,'title', title, 'release_year',
-        release_year,'photo', photo,'stock', stock,'price',price::float) as album,
-        json_agg(json_build_object('track',track,'song',song,'duration',duration))  as songs
-    from albums join artists on artists.artist_id = albums.artist_id
-    join songs on songs.album_id = albums.album_id 
-    where
-    lower(name) = $1 and lower(title) = $2 group by albums.album_id,name;
-$$ language sql;
+begin
+    case id_type
+        when 'id' then
+            return query select json_build_object('album_id',albums.album_id,'artist_id',artists.artist_id,'name',name,
+            'title', title, 'release_year',release_year,'photo', photo,'stock',stock,'price',price::float) as album,
+            json_agg(json_build_object('track',track,'song',song,'duration',duration))  as songs
+            from albums join artists on artists.artist_id = albums.artist_id
+            join songs on songs.album_id = albums.album_id 
+            where albums.album_id = $4 
+            group by albums.album_id,artists.artist_id,name;
+        when 'from-uri' then
+            return query select json_build_object('album_id',albums.album_id,'artist_id',artists.artist_id,'name',name,
+            'title', title, 'release_year',release_year,'photo', photo,'stock',stock,'price',price::float) as album,
+            json_agg(json_build_object('track',track,'song',song,'duration',duration))  as songs
+            from albums join artists on artists.artist_id = albums.artist_id
+            join songs on songs.album_id = albums.album_id 
+            where lower(name) = $2 and lower(title) = $3 
+            group by albums.album_id,artists.artist_id,name;
+    end case;
+end
+$$ language plpgsql;
 
 create function get_cart_count(in username varchar, in album_id int, out cart bigint) as
 $$
@@ -105,7 +119,7 @@ $$
     join albums on albums.album_id = cart.album_id
     join artists on artists.artist_id = albums.artist_id
     join users on users.user_id = cart.user_id
-    where users.username = 'varg_vikernes') AS cart,
+    where users.username = $1) AS cart,
 
     (select coalesce(json_agg(orders),'[]') as orders from (select 
     json_build_object('order_id',orders.order_id,'dispatched',orders.dispatched,
@@ -117,7 +131,7 @@ $$
     join albums on albums.album_id = orders_bridge.album_id
     join artists on artists.artist_id = albums.artist_id
     join users on users.user_id = orders.user_id
-    where users.username = 'varg_vikernes'
+    where users.username = $1
     group by orders.order_id) orders ) AS orders;
 $$ language sql;
 
