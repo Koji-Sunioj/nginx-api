@@ -10,6 +10,12 @@ fe_secret = dotenv_values(".env")["FE_SECRET"]
 be_secret = dotenv_values(".env")["BE_SECRET"]
 
 
+def save_file(filename, content):
+    new_photo = open("/var/www/blackmetal/common/%s" % filename, "wb")
+    new_photo.write(content)
+    new_photo.close()
+
+
 def insert_songs_cmd(form, album_id):
     song_pattern = r"^(?:track|duration|song)_[0-9]{1,2}$"
     indexes = [int(key.split("_")[1])

@@ -1,4 +1,5 @@
 import re
+import os
 import db_functions
 from jose import jwt
 from db_functions import cursor
@@ -6,7 +7,7 @@ from dotenv import dotenv_values
 from passlib.context import CryptContext
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from utils import verify_token, verify_admin_token, decode_role, encode_role, insert_songs_cmd, decode_token
+from utils import verify_token, verify_admin_token, decode_role, encode_role, insert_songs_cmd, decode_token, save_file
 from datetime import timedelta, datetime, timezone
 from fastapi import FastAPI, APIRouter, Request, Response, Depends
 
@@ -50,22 +51,42 @@ async def create_album(request: Request):
     form = await request.form()
     response = {"detail": None}
 
+    album_cmd = "select album_id from albums join artists on artists.artist_id = albums.artist_id \
+                where title=%s and artists.artist_id = %s;"
+
+    cursor.execute(album_cmd, (form["title"], form["artist_id"]))
+    album = cursor.fetchone()
+
+    if album != None:
+        return JSONResponse({"detail": "that album exists"}, 409)
+
     match form['action']:
         case "edit":
+
             cursor.callproc(
                 "get_album", ("id", None, None, form['album_id']))
             album = cursor.fetchone()["album"]
-            fields_to_change = [field for field in [
+
+            photo_is_same = form["photo"].filename == album["photo"] and form["photo"].size == os.stat("/var/www/blackmetal/common/%s" %
+                                                                                                       album["photo"]).st_size
+            fields_to_change = [{"value": form[field], "set": f"{field} = %s"} for field in [
                 "title", "release_year", "price", "artist_id"] if str(album[field]) != form[field]]
 
+            if not photo_is_same:
+                filename, content = form["photo"].filename, form["photo"].file.read(
+                )
+                save_file(filename, content)
+                fields_to_change.append(
+                    {"value": filename, "set": "photo = %s"})
+                os.remove("/var/www/blackmetal/common/%s" % album["photo"])
+
             if len(fields_to_change) > 0:
-                set_cmds = [
-                    f"{field} = %s" for field in fields_to_change]
-
-                set_cmds = ", ".join(set_cmds)
-
-                update_params = [form[field] for field in fields_to_change]
+                set_cmds = ", ".join([field["set"]
+                                     for field in fields_to_change])
+                update_params = [field["value"] for field in fields_to_change]
                 update_params.append(form['album_id'])
+
+                print(update_params)
 
                 update_album_cmd = f"""with updated as (update albums set {set_cmds} where album_id = %s returning * ) 
                     select title, name from updated join artists on artists.artist_id = updated.artist_id;"""
@@ -82,24 +103,10 @@ async def create_album(request: Request):
                 response["detail"] = "there was nothing to update"
 
         case "new":
-            album_cmd = "select album_id from albums join artists on artists.artist_id = albums.artist_id \
-                where title=%s and artists.artist_id = %s;"
-
-            """ cursor.callproc(
-                "get_album", ("from-uri", form["name"].lower(), form["title"].lower(), None))
-            album = cursor.fetchone()["album"] """
-
-            cursor.execute(album_cmd, (form["title"], form["artist_id"]))
-            album = cursor.fetchone()
-
-            if album != None:
-                return JSONResponse({"detail": "that album exists"}, 409)
 
             filename, content = form["photo"].filename, form["photo"].file.read(
             )
-            new_photo = open("/var/www/blackmetal/common/%s" % filename, "wb")
-            new_photo.write(content)
-            new_photo.close()
+            save_file(filename, content)
 
             insert_album_cmd = "with inserted as (insert into albums (title,release_year,price,\
                 photo,artist_id) values (%s,%s,%s,%s,%s) returning *) select album_id,name,title \
