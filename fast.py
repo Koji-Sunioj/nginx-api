@@ -7,7 +7,7 @@ from dotenv import dotenv_values
 from passlib.context import CryptContext
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from utils import verify_token, verify_admin_token, decode_role, encode_role, insert_songs_cmd, decode_token, save_file
+from utils import verify_token, verify_admin_token, decode_role, encode_role, insert_songs_cmd, decode_token, save_file, form_songs_to_list
 from datetime import timedelta, datetime, timezone
 from fastapi import FastAPI, APIRouter, Request, Response, Depends
 
@@ -52,20 +52,28 @@ async def create_album(request: Request):
     response = {"detail": None}
 
     album_cmd = "select album_id from albums join artists on artists.artist_id = albums.artist_id \
-                where title=%s and artists.artist_id = %s;"
+    where title=%s and artists.artist_id = %s;"
 
     cursor.execute(album_cmd, (form["title"], form["artist_id"]))
-    album = cursor.fetchone()
+    existing_album = cursor.fetchone()
 
-    if album != None:
+    edit_album_exists = form["action"] == "edit" and existing_album != None and str(
+        existing_album["album_id"]) != str(form["album_id"])
+    new_album_exists = form["action"] == "new" and existing_album != None
+
+    if any([edit_album_exists, new_album_exists]):
         return JSONResponse({"detail": "that album exists"}, 409)
 
     match form['action']:
         case "edit":
-
             cursor.callproc(
                 "get_album", ("id", None, None, form['album_id']))
-            album = cursor.fetchone()["album"]
+            data = cursor.fetchone()
+            album, songs = data["album"], data["songs"]
+
+            new_songs = form_songs_to_list(form)
+            print(songs)
+            print(new_songs)
 
             photo_is_same = form["photo"].filename == album["photo"] and form["photo"].size == os.stat("/var/www/blackmetal/common/%s" %
                                                                                                        album["photo"]).st_size
@@ -73,12 +81,12 @@ async def create_album(request: Request):
                 "title", "release_year", "price", "artist_id"] if str(album[field]) != form[field]]
 
             if not photo_is_same:
-                filename, content = form["photo"].filename, form["photo"].file.read(
+                """ filename, content = form["photo"].filename, form["photo"].file.read(
                 )
                 save_file(filename, content)
                 fields_to_change.append(
                     {"value": filename, "set": "photo = %s"})
-                os.remove("/var/www/blackmetal/common/%s" % album["photo"])
+                os.remove("/var/www/blackmetal/common/%s" % album["photo"]) """
 
             if len(fields_to_change) > 0:
                 set_cmds = ", ".join([field["set"]
@@ -86,12 +94,12 @@ async def create_album(request: Request):
                 update_params = [field["value"] for field in fields_to_change]
                 update_params.append(form['album_id'])
 
-                print(update_params)
+                # print(update_params)
 
                 update_album_cmd = f"""with updated as (update albums set {set_cmds} where album_id = %s returning * ) 
                     select title, name from updated join artists on artists.artist_id = updated.artist_id;"""
 
-                cursor.execute(update_album_cmd, update_params)
+                # cursor.execute(update_album_cmd, update_params)
 
                 updated_album = cursor.fetchone()
 
@@ -103,7 +111,6 @@ async def create_album(request: Request):
                 response["detail"] = "there was nothing to update"
 
         case "new":
-
             filename, content = form["photo"].filename, form["photo"].file.read(
             )
             save_file(filename, content)
@@ -118,7 +125,8 @@ async def create_album(request: Request):
             cursor.execute(insert_album_cmd, insert_album_params)
             inserted = cursor.fetchone()
 
-            insert_songs = insert_songs_cmd(form, inserted["album_id"])
+            new_songs = form_songs_to_list(form)
+            insert_songs = insert_songs_cmd(new_songs, inserted["album_id"])
             cursor.execute(insert_songs)
 
             response.update(
