@@ -7,7 +7,7 @@ from dotenv import dotenv_values
 from passlib.context import CryptContext
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from utils import verify_token, verify_admin_token, decode_role, encode_role, insert_songs_cmd, decode_token, save_file, form_songs_to_list
+from utils import verify_token, verify_admin_token, decode_role, encode_role, insert_songs_cmd, decode_token, save_file, form_songs_to_list, get_track
 from datetime import timedelta, datetime, timezone
 from fastapi import FastAPI, APIRouter, Request, Response, Depends
 
@@ -45,6 +45,21 @@ async def check_token(request: Request, response: Response):
     return response
 
 
+@admin.delete("/albums/{album_id}")
+@db_functions.tsql
+async def delete_album(album_id):
+    detail = "there was nothing to delete"
+    cursor.callproc(
+        "get_album", ("id", None, None, album_id))
+    album = cursor.fetchone()["album"]
+    del_command = "delete from albums where album_id = %s"
+    cursor.execute(del_command, (album_id,))
+    if cursor.rowcount > 0:
+        os.remove("/var/www/blackmetal/common/%s" % album["photo"])
+        detail = "album %s was deleted" % album["title"]
+    return JSONResponse({"detail": detail}, 200)
+
+
 @admin.post("/albums")
 @db_functions.tsql
 async def create_album(request: Request):
@@ -68,25 +83,70 @@ async def create_album(request: Request):
         case "edit":
             cursor.callproc(
                 "get_album", ("id", None, None, form['album_id']))
+
             data = cursor.fetchone()
             album, songs = data["album"], data["songs"]
+            response.update({"title": album["title"], "name": album["name"]})
 
             new_songs = form_songs_to_list(form)
-            print(songs)
-            print(new_songs)
+
+            existing_tracks = list(map(get_track, songs))
+            new_tracks = list(map(get_track, new_songs))
+
+            to_add_tracks = [
+                track for track in new_tracks if track not in existing_tracks]
+
+            to_delete_tracks = [
+                track for track in existing_tracks if track not in new_tracks]
+
+            to_update_tracks = []
+
+            for n, m in zip(new_songs, songs):
+                duration = None if n["duration"] == "null" else n["duration"]
+                if n["song"] != m["song"] or duration != m["duration"]:
+                    to_update_tracks.append(n)
 
             photo_is_same = form["photo"].filename == album["photo"] and form["photo"].size == os.stat("/var/www/blackmetal/common/%s" %
                                                                                                        album["photo"]).st_size
             fields_to_change = [{"value": form[field], "set": f"{field} = %s"} for field in [
                 "title", "release_year", "price", "artist_id"] if str(album[field]) != form[field]]
 
+            if len(to_delete_tracks) > 0:
+                print(to_delete_tracks)
+
+            if len(to_add_tracks) > 0:
+                filtered = [
+                    track for track in new_songs if track["track"] in to_add_tracks]
+                insert_songs = insert_songs_cmd(filtered, form["album_id"])
+                cursor.execute(insert_songs)
+
+            if len(to_update_tracks) > 0:
+                # update songs set duration
+                print(to_update_tracks)
+                fields_to_change = [{"set": "duration=%s,song=%s"}
+                                    for field in to_update_tracks]
+                print(fields_to_change)
+                # insert_songs = insert_songs_cmd(
+                #    to_update_tracks, form['album_id'])
+                # cursor.execute(insert_songs)
+                """
+                update songs as u set 
+                song = u2.song,
+                duration = u2.duration
+                from (values
+                (1,1037,'what',null),
+                (2,1037,'hello',220)
+                ) as u2(track,album_id,song,duration)
+                where u2.album_id=u.album_id
+                and u2.track=u.track;"""
+
             if not photo_is_same:
-                """ filename, content = form["photo"].filename, form["photo"].file.read(
+                filename, content = form["photo"].filename, form["photo"].file.read(
                 )
                 save_file(filename, content)
                 fields_to_change.append(
                     {"value": filename, "set": "photo = %s"})
-                os.remove("/var/www/blackmetal/common/%s" % album["photo"]) """
+                os.remove("/var/www/blackmetal/common/%s" % album["photo"])
 
             if len(fields_to_change) > 0:
                 set_cmds = ", ".join([field["set"]
@@ -94,19 +154,17 @@ async def create_album(request: Request):
                 update_params = [field["value"] for field in fields_to_change]
                 update_params.append(form['album_id'])
 
-                # print(update_params)
-
-                update_album_cmd = f"""with updated as (update albums set {set_cmds} where album_id = %s returning * ) 
+                update_album_cmd = f"""with updated as (update albums set {set_cmds} where album_id = %s returning * )
                     select title, name from updated join artists on artists.artist_id = updated.artist_id;"""
 
-                # cursor.execute(update_album_cmd, update_params)
-
+                cursor.execute(update_album_cmd, update_params)
                 updated_album = cursor.fetchone()
 
                 response.update(
                     {"title": updated_album["title"], "name": updated_album["name"]})
-                response["detail"] = "album %s updated" % updated_album["title"]
 
+            if any([len(to_delete_tracks) > 0, len(to_add_tracks) > 0, len(to_update_tracks) > 0, not photo_is_same, len(fields_to_change) > 0]):
+                response["detail"] = "album %s updated" % response["title"]
             else:
                 response["detail"] = "there was nothing to update"
 
@@ -133,11 +191,11 @@ async def create_album(request: Request):
                 {"title": inserted["title"], "name": inserted["name"]})
             response["detail"] = "album %s created" % inserted["title"]
 
-    return JSONResponse(response, 200)
+    return JSONResponse(response, 400)
 
 
-@admin.get("/artists")
-@db_functions.tsql
+@ admin.get("/artists")
+@ db_functions.tsql
 async def admin_get_artists():
     command = "select name,artist_id from artists order by name asc;"
     cursor.execute(command)
@@ -145,8 +203,8 @@ async def admin_get_artists():
     return JSONResponse({"artists": artists})
 
 
-@api.get("/artist/{artist_name}")
-@db_functions.tsql
+@ api.get("/artist/{artist_name}")
+@ db_functions.tsql
 async def get_artist(artist_name):
     artist_name = re.sub("\-", " ", artist_name).replace("'", "''")
     cursor.callproc("get_artist", (artist_name,))
@@ -154,12 +212,11 @@ async def get_artist(artist_name):
     return JSONResponse({"artist": artist}, 200)
 
 
-@api.get("/albums/{artist_name}/{album_name}")
-@db_functions.tsql
+@ api.get("/albums/{artist_name}/{album_name}")
+@ db_functions.tsql
 async def get_album(artist_name, album_name, request: Request):
     artist_name = re.sub("\-", " ", artist_name)
     album_name = re.sub("\-", " ", album_name)
-    print(album_name)
     cursor.callproc("get_album", ("from-uri", artist_name, album_name, None))
     album = cursor.fetchone()
     album["cart"] = None
@@ -174,13 +231,11 @@ async def get_album(artist_name, album_name, request: Request):
     except:
         pass
 
-    print(album)
-
     return JSONResponse(album, 200)
 
 
-@api.get("/albums")
-@db_functions.tsql
+@ api.get("/albums")
+@ db_functions.tsql
 async def get_albums(request: Request, page: int = 1, sort: str = "name", direction: str = "ascending", query: str = None):
     albums = {}
     cursor.callproc("get_pages", (query,))
@@ -190,8 +245,8 @@ async def get_albums(request: Request, page: int = 1, sort: str = "name", direct
     return JSONResponse({"albums": albums["data"], "pages": albums["pages"]}, 200)
 
 
-@api.post("/sign-in")
-@db_functions.tsql
+@ api.post("/sign-in")
+@ db_functions.tsql
 async def sign_in(request: Request):
     verified = False
     content = await request.json()
@@ -220,16 +275,16 @@ async def sign_in(request: Request):
     return JSONResponse(content={"detail": "signed in"}, headers=headers, status_code=200)
 
 
-@api.get("/orders", dependencies=[Depends(verify_token)])
-@db_functions.tsql
+@ api.get("/orders", dependencies=[Depends(verify_token)])
+@ db_functions.tsql
 async def get_orders_cart(request: Request):
     cursor.callproc("get_orders_and_cart", (request.state.sub,))
     orders_cart = cursor.fetchone()
     return JSONResponse(orders_cart, 200)
 
 
-@api.post("/cart/checkout", dependencies=[Depends(verify_token)])
-@db_functions.tsql
+@ api.post("/cart/checkout", dependencies=[Depends(verify_token)])
+@ db_functions.tsql
 async def checkout_cart_items(request: Request):
     cursor.callproc("get_user", (request.state.sub, "checkout"))
     data = cursor.fetchone()["bm_user"]
@@ -247,8 +302,8 @@ async def checkout_cart_items(request: Request):
     return JSONResponse({"detail": response}, 200)
 
 
-@api.post("/cart/{album_id}/add", dependencies=[Depends(verify_token)])
-@db_functions.tsql
+@ api.post("/cart/{album_id}/add", dependencies=[Depends(verify_token)])
+@ db_functions.tsql
 async def add_cart_item(request: Request, album_id):
     cursor.callproc("get_user", (request["state"]["sub"], "owner"))
     user_id = cursor.fetchone()["bm_user"]["user_id"]
@@ -266,8 +321,8 @@ async def add_cart_item(request: Request, album_id):
     return JSONResponse(stock_cart, 200)
 
 
-@api.post("/cart/{album_id}/remove", dependencies=[Depends(verify_token)])
-@db_functions.tsql
+@ api.post("/cart/{album_id}/remove", dependencies=[Depends(verify_token)])
+@ db_functions.tsql
 async def del_cart_item(request: Request, album_id):
     cursor.callproc("get_user", (request["state"]["sub"], "owner"))
     user_id = cursor.fetchone()["bm_user"]["user_id"]
@@ -282,16 +337,16 @@ async def del_cart_item(request: Request, album_id):
     return JSONResponse(stock_cart, 200)
 
 
-@api.get("/user", dependencies=[Depends(verify_token)])
-@db_functions.tsql
+@ api.get("/user", dependencies=[Depends(verify_token)])
+@ db_functions.tsql
 async def get_user(request: Request):
     cursor.callproc("get_user", (request.state.sub, "cart"))
     user = cursor.fetchone()["bm_user"]
     return JSONResponse({"user": jsonable_encoder(user)}, 200)
 
 
-@api.post("/register")
-@db_functions.tsql
+@ api.post("/register")
+@ db_functions.tsql
 async def register(request: Request):
     content = await request.json()
     guest_list = dotenv_values(".env")["GUEST_LIST"].split(",")

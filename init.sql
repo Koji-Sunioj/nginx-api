@@ -18,7 +18,7 @@ create table albums(
     price decimal(4,2),
     photo varchar,
     artist_id smallint,
-    created timestamp default timezone('utc', now()),
+    modified timestamp default timezone('utc', now()),
     foreign key (artist_id) references artists (artist_id)
 );
 
@@ -196,7 +196,7 @@ returns table (
 	stock smallint, 
     release_year smallint, 
     price double precision,
-    created varchar
+    modified varchar
 ) as 
 $$
 declare 
@@ -205,7 +205,7 @@ new_query varchar := ' where lower(name) like lower(''%' || $4 || '%'') or lower
 begin  
     return query execute '
     select albums.photo,albums.title,artists.name,albums.stock, albums.release_year, 
-    albums.price::float, albums.created::varchar
+    albums.price::float, albums.modified::varchar
     from albums
     join artists on artists.artist_id = albums.artist_id'
     || case when $4 is not null then new_query else ' ' end || 

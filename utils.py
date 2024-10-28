@@ -35,6 +35,10 @@ def form_songs_to_list(form):
     return songs
 
 
+def get_track(n):
+    return n["track"]
+
+
 def insert_songs_cmd(songs, album_id):
     insert_songs = "insert into songs (album_id,track,duration,song) values\n%s;"
     inserts = ["(%s,%s,%s,'%s')" % (album_id, x["track"],
