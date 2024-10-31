@@ -4,12 +4,13 @@ import db_functions
 from jose import jwt
 from db_functions import cursor
 from dotenv import dotenv_values
+from typing import Annotated
 from passlib.context import CryptContext
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from utils import verify_token, verify_admin_token, decode_role, encode_role, insert_songs_cmd, decode_token, save_file, form_songs_to_list, get_track
 from datetime import timedelta, datetime, timezone
-from fastapi import FastAPI, APIRouter, Request, Response, Depends
+from fastapi import FastAPI, APIRouter, Request, Response, Depends, Header
 
 
 app = FastAPI()
@@ -106,41 +107,45 @@ async def create_album(request: Request):
                 if n["song"] != m["song"] or duration != m["duration"]:
                     to_update_tracks.append(n)
 
-            photo_is_same = form["photo"].filename == album["photo"] and form["photo"].size == os.stat("/var/www/blackmetal/common/%s" %
-                                                                                                       album["photo"]).st_size
             fields_to_change = [{"value": form[field], "set": f"{field} = %s"} for field in [
                 "title", "release_year", "price", "artist_id"] if str(album[field]) != form[field]]
 
-            if len(to_delete_tracks) > 0:
-                print(to_delete_tracks)
+            should_del_tracks = len(to_delete_tracks) > 0
+            should_add_tracks = len(to_add_tracks) > 0
+            should_update_tracks = len(to_update_tracks) > 0
+            should_update_album = len(fields_to_change) > 0
+            photo_not_same = form["photo"].filename != album["photo"] and form["photo"].size != os.stat(
+                "/var/www/blackmetal/common/%s" % album["photo"]).st_size
 
-            if len(to_add_tracks) > 0:
+            if should_del_tracks > 0:
+                delete_songs_cmd = f"""
+                delete from songs where track in ({",".join(str(track) for track in to_delete_tracks)}) 
+                and album_id = %s;
+                """
+                cursor.execute(delete_songs_cmd, (form["album_id"],))
+
+            if should_add_tracks > 0:
                 filtered = [
                     track for track in new_songs if track["track"] in to_add_tracks]
                 insert_songs = insert_songs_cmd(filtered, form["album_id"])
                 cursor.execute(insert_songs)
 
-            if len(to_update_tracks) > 0:
-                # update songs set duration
-                print(to_update_tracks)
-                fields_to_change = [{"set": "duration=%s,song=%s"}
-                                    for field in to_update_tracks]
-                print(fields_to_change)
-                # insert_songs = insert_songs_cmd(
-                #    to_update_tracks, form['album_id'])
-                # cursor.execute(insert_songs)
-                """
-                update songs as u set 
-                song = u2.song,
-                duration = u2.duration
+            if should_update_tracks:
+                songs_to_change = ["(%s,%s,'%s',%s)" % (field["track"], form["album_id"], field["song"], field["duration"])
+                                   for field in to_update_tracks]
+                update_songs_cmd = f"""
+                update songs 
+                set song = new_songs.song,
+                duration = new_songs.duration
                 from (values
-                (1,1037,'what',null),
-                (2,1037,'hello',220)
-                ) as u2(track,album_id,song,duration)
-                where u2.album_id=u.album_id
-                and u2.track=u.track;"""
+                {",".join(songs_to_change)}
+                ) as new_songs(track,album_id,song,duration)
+                where new_songs.album_id=songs.album_id
+                and new_songs.track=songs.track;"""
 
-            if not photo_is_same:
+                cursor.execute(update_songs_cmd)
+
+            if photo_not_same:
                 filename, content = form["photo"].filename, form["photo"].file.read(
                 )
                 save_file(filename, content)
@@ -148,7 +153,7 @@ async def create_album(request: Request):
                     {"value": filename, "set": "photo = %s"})
                 os.remove("/var/www/blackmetal/common/%s" % album["photo"])
 
-            if len(fields_to_change) > 0:
+            if should_update_album:
                 set_cmds = ", ".join([field["set"]
                                      for field in fields_to_change])
                 update_params = [field["value"] for field in fields_to_change]
@@ -158,12 +163,12 @@ async def create_album(request: Request):
                     select title, name from updated join artists on artists.artist_id = updated.artist_id;"""
 
                 cursor.execute(update_album_cmd, update_params)
-                updated_album = cursor.fetchone()
 
+                updated_album = cursor.fetchone()
                 response.update(
                     {"title": updated_album["title"], "name": updated_album["name"]})
 
-            if any([len(to_delete_tracks) > 0, len(to_add_tracks) > 0, len(to_update_tracks) > 0, not photo_is_same, len(fields_to_change) > 0]):
+            if any([should_del_tracks, should_add_tracks, should_update_tracks, should_update_album, photo_not_same]):
                 response["detail"] = "album %s updated" % response["title"]
             else:
                 response["detail"] = "there was nothing to update"
@@ -191,7 +196,7 @@ async def create_album(request: Request):
                 {"title": inserted["title"], "name": inserted["name"]})
             response["detail"] = "album %s created" % inserted["title"]
 
-    return JSONResponse(response, 400)
+    return JSONResponse(response, 200)
 
 
 @ admin.get("/artists")
@@ -214,15 +219,14 @@ async def get_artist(artist_name):
 
 @ api.get("/albums/{artist_name}/{album_name}")
 @ db_functions.tsql
-async def get_album(artist_name, album_name, request: Request):
+async def get_album(artist_name, album_name, request: Request, cart: str = None):
     artist_name = re.sub("\-", " ", artist_name)
     album_name = re.sub("\-", " ", album_name)
     cursor.callproc("get_album", ("from-uri", artist_name, album_name, None))
     album = cursor.fetchone()
-    album["cart"] = None
 
     try:
-        if "cookie" in request.headers:
+        if "cookie" in request.headers and cart == "get":
             jwt_payload = await decode_token(request)
             cursor.callproc("get_cart_count", (jwt_payload["sub"],
                             album["album"]["album_id"]))
@@ -236,7 +240,7 @@ async def get_album(artist_name, album_name, request: Request):
 
 @ api.get("/albums")
 @ db_functions.tsql
-async def get_albums(request: Request, page: int = 1, sort: str = "name", direction: str = "ascending", query: str = None):
+async def get_albums(page: int = 1, sort: str = "name", direction: str = "ascending", query: str = None):
     albums = {}
     cursor.callproc("get_pages", (query,))
     albums["pages"] = cursor.fetchone()["pages"]
