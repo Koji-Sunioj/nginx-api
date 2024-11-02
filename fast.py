@@ -118,32 +118,22 @@ async def create_album(request: Request):
                 "/var/www/blackmetal/common/%s" % album["photo"]).st_size
 
             if should_del_tracks > 0:
-                delete_songs_cmd = f"""
-                delete from songs where track in ({",".join(str(track) for track in to_delete_tracks)}) 
-                and album_id = %s;
-                """
-                cursor.execute(delete_songs_cmd, (form["album_id"],))
+                cursor.callproc(
+                    "delete_songs", (form["album_id"], to_delete_tracks))
+
+            if should_update_tracks:
+                tracks = list(map(get_track, to_update_tracks))
+                album_ids = [int(form["album_id"])] * len(to_update_tracks)
+                durations = [field["duration"] for field in to_update_tracks]
+                update_songs = [field["song"] for field in to_update_tracks]
+                cursor.callproc(
+                    "update_songs", (tracks, album_ids, durations, update_songs,))
 
             if should_add_tracks > 0:
                 filtered = [
                     track for track in new_songs if track["track"] in to_add_tracks]
                 insert_songs = insert_songs_cmd(filtered, form["album_id"])
                 cursor.execute(insert_songs)
-
-            if should_update_tracks:
-                songs_to_change = ["(%s,%s,'%s',%s)" % (field["track"], form["album_id"], field["song"], field["duration"])
-                                   for field in to_update_tracks]
-                update_songs_cmd = f"""
-                update songs 
-                set song = new_songs.song,
-                duration = new_songs.duration
-                from (values
-                {",".join(songs_to_change)}
-                ) as new_songs(track,album_id,song,duration)
-                where new_songs.album_id=songs.album_id
-                and new_songs.track=songs.track;"""
-
-                cursor.execute(update_songs_cmd)
 
             if photo_not_same:
                 filename, content = form["photo"].filename, form["photo"].file.read(

@@ -86,7 +86,7 @@ begin
         when 'id' then
             return query select json_build_object('album_id',albums.album_id,'artist_id',artists.artist_id,'name',name,
             'title', title, 'release_year',release_year,'photo', photo,'stock',stock,'price',price::float) as album,
-            json_agg(json_build_object('track',track,'song',song,'duration',duration))  as songs
+            json_agg(json_build_object('track',track,'song',song,'duration',duration) order by track)  as songs
             from albums join artists on artists.artist_id = albums.artist_id
             join songs on songs.album_id = albums.album_id 
             where albums.album_id = $4 
@@ -94,7 +94,7 @@ begin
         when 'from-uri' then
             return query select json_build_object('album_id',albums.album_id,'artist_id',artists.artist_id,'name',name,
             'title', title, 'release_year',release_year,'photo', photo,'stock',stock,'price',price::float) as album,
-            json_agg(json_build_object('track',track,'song',song,'duration',duration))  as songs
+            json_agg(json_build_object('track',track,'song',song,'duration',duration) order by track)  as songs
             from albums join artists on artists.artist_id = albums.artist_id
             join songs on songs.album_id = albums.album_id 
             where lower(name) = $2 and lower(title) = $3 
@@ -214,6 +214,29 @@ begin
     format('limit 8 offset %s',new_offset); 
 end
 $$ language plpgsql;
+
+create function update_songs(in existing_tracks int[],in existing_album_ids int[],
+    in new_durations int[],in new_songs varchar[])
+returns void as 
+$$
+    update songs 
+    set song = new_songs.song,
+    	duration = new_songs.duration
+    from (select 
+		unnest($1) as track,
+		unnest($2) as album_id,
+		unnest($3) as duration,
+		unnest($4) as song ) as new_songs
+    where new_songs.album_id=songs.album_id
+    and new_songs.track=songs.track
+$$ language sql;
+
+create function delete_songs(in album_id int, in del_songs int[]) 
+returns void as
+$$
+    delete from songs where album_id = $1
+    and track in (select unnest($2));
+$$ language sql;
 
 create function create_user(in username varchar, in password varchar, in role varchar) 
 returns void as
