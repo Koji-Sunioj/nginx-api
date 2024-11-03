@@ -228,8 +228,17 @@ $$
 		unnest($3) as duration,
 		unnest($4) as song ) as new_songs
     where new_songs.album_id=songs.album_id
-    and new_songs.track=songs.track
+    and new_songs.track=songs.track;
 $$ language sql;
+
+create function insert_songs(in tracks_ids int[],in album_ids int[],
+    in durations int[],in new_songs varchar[]) 
+returns void as
+$$
+    insert into songs (track,album_id,duration,song)
+    select  unnest($1), unnest($2),unnest($3),unnest($4);
+$$ language sql;
+
 
 create function delete_songs(in album_id int, in del_songs int[]) 
 returns void as

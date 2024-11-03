@@ -8,7 +8,7 @@ from typing import Annotated
 from passlib.context import CryptContext
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from utils import verify_token, verify_admin_token, decode_role, encode_role, insert_songs_cmd, decode_token, save_file, form_songs_to_list, get_track
+from utils import verify_token, verify_admin_token, decode_role, encode_role, decode_token, save_file, form_songs_to_list, get_track, songs_to_matrix
 from datetime import timedelta, datetime, timezone
 from fastapi import FastAPI, APIRouter, Request, Response, Depends, Header
 
@@ -100,12 +100,8 @@ async def create_album(request: Request):
             to_delete_tracks = [
                 track for track in existing_tracks if track not in new_tracks]
 
-            to_update_tracks = []
-
-            for n, m in zip(new_songs, songs):
-                duration = None if n["duration"] == "null" else n["duration"]
-                if n["song"] != m["song"] or duration != m["duration"]:
-                    to_update_tracks.append(n)
+            to_update_tracks = [new_song for new_song, old_song in zip(
+                new_songs, songs) if new_song["song"] != old_song["song"] or new_song["duration"] != old_song["duration"]]
 
             fields_to_change = [{"value": form[field], "set": f"{field} = %s"} for field in [
                 "title", "release_year", "price", "artist_id"] if str(album[field]) != form[field]]
@@ -117,23 +113,20 @@ async def create_album(request: Request):
             photo_not_same = form["photo"].filename != album["photo"] and form["photo"].size != os.stat(
                 "/var/www/blackmetal/common/%s" % album["photo"]).st_size
 
-            if should_del_tracks > 0:
+            if should_del_tracks:
                 cursor.callproc(
                     "delete_songs", (form["album_id"], to_delete_tracks))
 
             if should_update_tracks:
-                tracks = list(map(get_track, to_update_tracks))
-                album_ids = [int(form["album_id"])] * len(to_update_tracks)
-                durations = [field["duration"] for field in to_update_tracks]
-                update_songs = [field["song"] for field in to_update_tracks]
-                cursor.callproc(
-                    "update_songs", (tracks, album_ids, durations, update_songs,))
+                updated_matrix = songs_to_matrix(to_update_tracks)
+                cursor.callproc("update_songs", (*updated_matrix,))
 
-            if should_add_tracks > 0:
+            if should_add_tracks:
                 filtered = [
                     track for track in new_songs if track["track"] in to_add_tracks]
-                insert_songs = insert_songs_cmd(filtered, form["album_id"])
-                cursor.execute(insert_songs)
+                inserted_matrix = songs_to_matrix(filtered)
+                cursor.callproc(
+                    "insert_songs", (* inserted_matrix,))
 
             if photo_not_same:
                 filename, content = form["photo"].filename, form["photo"].file.read(
@@ -178,9 +171,9 @@ async def create_album(request: Request):
             cursor.execute(insert_album_cmd, insert_album_params)
             inserted = cursor.fetchone()
 
-            new_songs = form_songs_to_list(form)
-            insert_songs = insert_songs_cmd(new_songs, inserted["album_id"])
-            cursor.execute(insert_songs)
+            new_songs = form_songs_to_list(form, inserted["album_id"])
+            inserted_matrix = songs_to_matrix(new_songs)
+            cursor.callproc("insert_songs", (* inserted_matrix,))
 
             response.update(
                 {"title": inserted["title"], "name": inserted["name"]})

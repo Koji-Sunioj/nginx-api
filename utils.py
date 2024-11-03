@@ -16,20 +16,30 @@ def save_file(filename, content):
     new_photo.close()
 
 
-def form_songs_to_list(form):
+def songs_to_matrix(songs):
+    init_matrix = [list(array.values()) for array in songs]
+    reshaped = [list(n) for n in zip(*init_matrix)]
+    return reshaped
+
+
+def form_songs_to_list(form, new_album_id=None):
     song_pattern = r"^(?:track|duration|song)_[0-9]{1,2}$"
     indexes = [int(key.split("_")[1])
                for key in form.keys() if re.search(song_pattern, key)]
     song_indexes = list(set(indexes))
 
     songs = []
+
+    album_id = int(form["album_id"]) if len(
+        form["album_id"]) > 0 else new_album_id
+
     for index in song_indexes:
-        duration = "null"
+        duration = None
         if len(form[f"duration_{index}"]) > 0:
             duration_vals = form[f"duration_{index}"].split(":")
             duration = int(duration_vals[0]) * 60 + int(duration_vals[1])
 
-        song = {"track": int(form[f"track_{index}"]),
+        song = {"track": int(form[f"track_{index}"]), "album_id": album_id,
                 "duration": duration, "song": form[f"song_{index}"]}
         songs.append(song)
     return songs
@@ -37,14 +47,6 @@ def form_songs_to_list(form):
 
 def get_track(n):
     return n["track"]
-
-
-def insert_songs_cmd(songs, album_id):
-    insert_songs = "insert into songs (album_id,track,duration,song) values\n%s;"
-    inserts = ["(%s,%s,%s,'%s')" % (album_id, x["track"],
-                                    x["duration"], x["song"]) for x in songs]
-    insert_songs_cmd = insert_songs % ",\n".join(inserts)
-    return insert_songs_cmd
 
 
 def encode_role(role):
