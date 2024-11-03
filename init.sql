@@ -305,6 +305,25 @@ $$
     where sub.album_id = albums.album_id returning albums.stock as remaining, sub.quantity as cart;
 $$ language sql;
 
+create function update_modified(in album_id int,out name varchar,out title varchar) as
+$$  
+    with updated as (
+    update albums set modified = now() at time zone 'utc'
+    where album_id = $1 returning *)
+    select name,title from updated join artists on artists.artist_id = updated.artist_id;
+$$ language sql;
+
+create function insert_album(in title varchar,in release_year int,in price double precision,
+    in photo varchar,in artist_id int,out album_id int,out name varchar,out title varchar) 
+as
+$$
+    with inserted as 
+    (insert into albums (title,release_year,price,photo,artist_id) 
+    values ($1,$2,$3,$4,$5) returning *) 
+    select album_id,name,title
+    from inserted join artists on artists.artist_id = inserted.artist_id;
+$$ language sql;
+
 insert into artists (artist_id, name, bio) values
 (100,'Ascension','Black metal band from Tornau vor der Heide, Saxony-Anhalt, Germany.'),
 (101,'The Black','Black metal band from Sweden.

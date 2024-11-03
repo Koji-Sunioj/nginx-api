@@ -67,17 +67,24 @@ async def create_album(request: Request):
     form = await request.form()
     response = {"detail": None}
 
-    album_cmd = "select album_id from albums join artists on artists.artist_id = albums.artist_id \
-    where title=%s and artists.artist_id = %s;"
+    # album_cmd = "select album_id,name,title from albums join artists on artists.artist_id = albums.artist_id \
+    # where title=%s and artists.artist_id = %s;"
+    album_cmd = "select artists.name,json_agg(json_build_object('album_id',album_id,'title',title)) \
+    as albums from albums join artists on artists.artist_id = albums.artist_id \
+    where artists.artist_id = 113 group by artists.artist_id;"
 
-    cursor.execute(album_cmd, (form["title"], form["artist_id"]))
+    cursor.execute(album_cmd, (form["artist_id"],))
     existing_album = cursor.fetchone()
+    # existing_titles = [row["title"] for row in existing_album]
+    print(existing_album)
 
     edit_album_exists = form["action"] == "edit" and existing_album != None and str(
         existing_album["album_id"]) != str(form["album_id"])
-    new_album_exists = form["action"] == "new" and existing_album != None
+    new_album_exists = form["action"] == "new" and form["title"] in [
+        row["title"] for row in existing_album["albums"]]
 
-    if any([edit_album_exists, new_album_exists]):
+    # if any([edit_album_exists, new_album_exists]):
+    if any([new_album_exists]):
         return JSONResponse({"detail": "that album exists"}, 409)
 
     match form['action']:
@@ -87,7 +94,6 @@ async def create_album(request: Request):
 
             data = cursor.fetchone()
             album, songs = data["album"], data["songs"]
-            response.update({"title": album["title"], "name": album["name"]})
 
             new_songs = form_songs_to_list(form)
 
@@ -135,40 +141,41 @@ async def create_album(request: Request):
                 fields_to_change.append(
                     {"value": filename, "set": "photo = %s"})
                 os.remove("/var/www/blackmetal/common/%s" % album["photo"])
+                should_update_album = True
 
             if should_update_album:
                 set_cmds = ", ".join([field["set"]
                                      for field in fields_to_change])
                 update_params = [field["value"] for field in fields_to_change]
                 update_params.append(form['album_id'])
+                update_album_cmd = f"""update albums set {set_cmds} where album_id = %s;"""
 
-                update_album_cmd = f"""with updated as (update albums set {set_cmds} where album_id = %s returning * )
-                    select title, name from updated join artists on artists.artist_id = updated.artist_id;"""
+                cursor.execute(update_album_cmd, (*update_params,))
 
-                cursor.execute(update_album_cmd, update_params)
-
+            if any([should_del_tracks, should_add_tracks, should_update_tracks, should_update_album, photo_not_same]):
+                cursor.callproc("update_modified", (form["album_id"],))
                 updated_album = cursor.fetchone()
                 response.update(
                     {"title": updated_album["title"], "name": updated_album["name"]})
 
-            if any([should_del_tracks, should_add_tracks, should_update_tracks, should_update_album, photo_not_same]):
                 response["detail"] = "album %s updated" % response["title"]
             else:
                 response["detail"] = "there was nothing to update"
 
         case "new":
-            filename, content = form["photo"].filename, form["photo"].file.read(
-            )
-            save_file(filename, content)
+            content = form["photo"].file.read()
+            new_filename = "%s-%s" % (
+                existing_album["name"].lower(), form["title"].lower())
+            db_ready_file = re.sub(
+                "[^a-z0-9\s\-]", "", new_filename).replace(" ", "-")
 
-            insert_album_cmd = "with inserted as (insert into albums (title,release_year,price,\
-                photo,artist_id) values (%s,%s,%s,%s,%s) returning *) select album_id,name,title \
-                    from inserted join artists on artists.artist_id = inserted.artist_id;"
+            save_file(db_ready_file, content)
 
             insert_album_params = (
-                form["title"], form["release_year"], form["price"], filename, form["artist_id"])
+                form["title"], form["release_year"], form["price"], db_ready_file, form["artist_id"])
 
-            cursor.execute(insert_album_cmd, insert_album_params)
+            cursor.callproc("insert_album", insert_album_params)
+
             inserted = cursor.fetchone()
 
             new_songs = form_songs_to_list(form, inserted["album_id"])
