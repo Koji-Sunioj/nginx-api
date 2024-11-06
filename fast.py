@@ -8,7 +8,7 @@ from typing import Annotated
 from passlib.context import CryptContext
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from utils import verify_token, verify_admin_token, decode_role, encode_role, decode_token, save_file, form_songs_to_list, get_track, songs_to_matrix
+from utils import verify_token, verify_admin_token, decode_role, encode_role, decode_token, save_file, form_songs_to_list, get_track, songs_to_matrix, db_ready_file
 from datetime import timedelta, datetime, timezone
 from fastapi import FastAPI, APIRouter, Request, Response, Depends, Header
 
@@ -67,25 +67,30 @@ async def create_album(request: Request):
     form = await request.form()
     response = {"detail": None}
 
-    # album_cmd = "select album_id,name,title from albums join artists on artists.artist_id = albums.artist_id \
-    # where title=%s and artists.artist_id = %s;"
-    album_cmd = "select artists.name,json_agg(json_build_object('album_id',album_id,'title',title)) \
-    as albums from albums join artists on artists.artist_id = albums.artist_id \
-    where artists.artist_id = 113 group by artists.artist_id;"
+    album_cmd = "select  \
+    (select name from (select artists.name from artists where artists.artist_id = %s) sub), \
+    albums from \
+    (select coalesce(json_agg(existing_albums),'[]')  \
+    as albums from \
+    (select album_id,title \
+    from albums join artists on  \
+    artists.artist_id = albums.artist_id  \
+    where artists.artist_id = %s) existing_albums) as existing_albums;"
 
-    cursor.execute(album_cmd, (form["artist_id"],))
-    existing_album = cursor.fetchone()
-    # existing_titles = [row["title"] for row in existing_album]
-    print(existing_album)
+    cursor.execute(album_cmd, (form["artist_id"], form["artist_id"]))
+    existing_albums = cursor.fetchone()
 
-    edit_album_exists = form["action"] == "edit" and existing_album != None and str(
-        existing_album["album_id"]) != str(form["album_id"])
+    edit_album_exists = form["action"] == "edit" and len(
+        [album for album in existing_albums["albums"] if album["album_id"] != int(form['album_id']) and album["title"] == form["title"]]) > 0
+
     new_album_exists = form["action"] == "new" and form["title"] in [
-        row["title"] for row in existing_album["albums"]]
+        row["title"] for row in existing_albums["albums"]]
 
-    # if any([edit_album_exists, new_album_exists]):
-    if any([new_album_exists]):
+    if any([new_album_exists, edit_album_exists]):
         return JSONResponse({"detail": "that album exists"}, 409)
+
+    filename = db_ready_file(
+        existing_albums["name"], form["title"], form["photo"].filename)
 
     match form['action']:
         case "edit":
@@ -116,7 +121,7 @@ async def create_album(request: Request):
             should_add_tracks = len(to_add_tracks) > 0
             should_update_tracks = len(to_update_tracks) > 0
             should_update_album = len(fields_to_change) > 0
-            photo_not_same = form["photo"].filename != album["photo"] and form["photo"].size != os.stat(
+            photo_not_same = filename != album["photo"] and form["photo"].size != os.stat(
                 "/var/www/blackmetal/common/%s" % album["photo"]).st_size
 
             if should_del_tracks:
@@ -135,8 +140,7 @@ async def create_album(request: Request):
                     "insert_songs", (* inserted_matrix,))
 
             if photo_not_same:
-                filename, content = form["photo"].filename, form["photo"].file.read(
-                )
+                content = form["photo"].file.read()
                 save_file(filename, content)
                 fields_to_change.append(
                     {"value": filename, "set": "photo = %s"})
@@ -164,15 +168,10 @@ async def create_album(request: Request):
 
         case "new":
             content = form["photo"].file.read()
-            new_filename = "%s-%s" % (
-                existing_album["name"].lower(), form["title"].lower())
-            db_ready_file = re.sub(
-                "[^a-z0-9\s\-]", "", new_filename).replace(" ", "-")
-
-            save_file(db_ready_file, content)
+            save_file(filename, content)
 
             insert_album_params = (
-                form["title"], form["release_year"], form["price"], db_ready_file, form["artist_id"])
+                form["title"], form["release_year"], form["price"], filename, form["artist_id"])
 
             cursor.callproc("insert_album", insert_album_params)
 

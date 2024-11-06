@@ -10,6 +10,13 @@ fe_secret = dotenv_values(".env")["FE_SECRET"]
 be_secret = dotenv_values(".env")["BE_SECRET"]
 
 
+def db_ready_file(name, title, filename):
+    file_params = "%s-%s" % (name.lower(), title.lower())
+    new_filename = re.sub("[^a-z0-9\s\-]", "", file_params).replace(" ", "-")
+    extension = filename.split(".")[-1]
+    return "%s.%s" % (new_filename, extension)
+
+
 def save_file(filename, content):
     new_photo = open("/var/www/blackmetal/common/%s" % filename, "wb")
     new_photo.write(content)
