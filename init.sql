@@ -135,6 +135,19 @@ $$
     group by orders.order_id) orders ) AS orders;
 $$ language sql;
 
+create function get_artist_f_id(in artist_id int,out name varchar,out albums json) as
+$$
+    select  
+    (select name from (select artists.name from artists where artists.artist_id = $1) sub), 
+    albums from 
+    (select coalesce(json_agg(existing_albums),'[]')  
+    as albums from 
+    (select album_id,title 
+    from albums join artists on  
+    artists.artist_id = albums.artist_id  
+    where artists.artist_id = $1) existing_albums) as existing_albums;
+$$ language sql;
+
 create function get_artist(in artist_name varchar,out name varchar,out bio varchar,out albums json) as
 $$
     select name, bio, json_agg(json_build_object('title',title,'name',name,'release_year',release_year,
@@ -323,6 +336,23 @@ $$
     select album_id,name,title
     from inserted join artists on artists.artist_id = inserted.artist_id;
 $$ language sql;
+
+create function update_album(in album_id int,in title varchar,in release_year int,
+    in price double precision,in artist_id int,in photo varchar)
+returns void as 
+$$
+declare 
+	set_title varchar:= ' title = '''||$2||'''';
+	set_release_year varchar:= ' release_year = '||$3||'';
+	set_price varchar:= ' price = '||$4||'';
+	set_artist_id varchar:= ' artist_id = '||$5||'';
+	set_photo varchar:= ' photo = '''||$6||'''';
+	set_modified varchar:= ' modified = now() at time zone ''utc''';
+sets varchar[] := array[set_title,set_release_year,set_price,set_photo,set_artist_id,set_modified];
+begin  
+	execute 'update albums set '||array_to_string(sets, ',')||' where album_id='||$1||';';
+end
+$$ language plpgsql;
 
 insert into artists (artist_id, name, bio) values
 (100,'Ascension','Black metal band from Tornau vor der Heide, Saxony-Anhalt, Germany.'),

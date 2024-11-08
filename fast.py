@@ -8,9 +8,10 @@ from typing import Annotated
 from passlib.context import CryptContext
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from utils import verify_token, verify_admin_token, decode_role, encode_role, decode_token, save_file, form_songs_to_list, get_track, songs_to_matrix, db_ready_file
+from utils import *
+# verify_token, verify_admin_token, decode_role, encode_role, decode_token, save_file, form_songs_to_list, get_track, songs_to_matrix, db_ready_file
 from datetime import timedelta, datetime, timezone
-from fastapi import FastAPI, APIRouter, Request, Response, Depends, Header
+from fastapi import FastAPI, APIRouter, Request, Response, Depends
 
 
 app = FastAPI()
@@ -67,17 +68,7 @@ async def create_album(request: Request):
     form = await request.form()
     response = {"detail": None}
 
-    album_cmd = "select  \
-    (select name from (select artists.name from artists where artists.artist_id = %s) sub), \
-    albums from \
-    (select coalesce(json_agg(existing_albums),'[]')  \
-    as albums from \
-    (select album_id,title \
-    from albums join artists on  \
-    artists.artist_id = albums.artist_id  \
-    where artists.artist_id = %s) existing_albums) as existing_albums;"
-
-    cursor.execute(album_cmd, (form["artist_id"], form["artist_id"]))
+    cursor.callproc("get_artist_f_id", (form["artist_id"],))
     existing_albums = cursor.fetchone()
 
     edit_album_exists = form["action"] == "edit" and len(
@@ -114,13 +105,14 @@ async def create_album(request: Request):
             to_update_tracks = [new_song for new_song, old_song in zip(
                 new_songs, songs) if new_song["song"] != old_song["song"] or new_song["duration"] != old_song["duration"]]
 
-            fields_to_change = [{"value": form[field], "set": f"{field} = %s"} for field in [
-                "title", "release_year", "price", "artist_id"] if str(album[field]) != form[field]]
+            fields_to_change = {field: form[field] if str(album[field]) != form[field] else None for field in [
+                "title", "release_year", "price", "artist_id"]}
+            fields_to_change["photo"] = None
 
             should_del_tracks = len(to_delete_tracks) > 0
             should_add_tracks = len(to_add_tracks) > 0
             should_update_tracks = len(to_update_tracks) > 0
-            should_update_album = len(fields_to_change) > 0
+            should_update_album = any(fields_to_change.values())
             photo_not_same = filename != album["photo"] and form["photo"].size != os.stat(
                 "/var/www/blackmetal/common/%s" % album["photo"]).st_size
 
@@ -142,19 +134,15 @@ async def create_album(request: Request):
             if photo_not_same:
                 content = form["photo"].file.read()
                 save_file(filename, content)
-                fields_to_change.append(
-                    {"value": filename, "set": "photo = %s"})
+                fields_to_change["photo"] = filename
                 os.remove("/var/www/blackmetal/common/%s" % album["photo"])
                 should_update_album = True
 
             if should_update_album:
-                set_cmds = ", ".join([field["set"]
-                                     for field in fields_to_change])
-                update_params = [field["value"] for field in fields_to_change]
-                update_params.append(form['album_id'])
-                update_album_cmd = f"""update albums set {set_cmds} where album_id = %s;"""
+                cursor.callproc(
+                    "update_album", (form["album_id"], * fields_to_change.values()))
 
-                cursor.execute(update_album_cmd, (*update_params,))
+                print(cursor.query)
 
             if any([should_del_tracks, should_add_tracks, should_update_tracks, should_update_album, photo_not_same]):
                 cursor.callproc("update_modified", (form["album_id"],))
