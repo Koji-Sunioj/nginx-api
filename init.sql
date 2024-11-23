@@ -190,8 +190,7 @@ $$
 begin
     if $1 is null then
         return query select ceil(count(album_id)::float / 8)::int as pages 
-        from albums
-        join artists on artists.artist_id = albums.artist_id;
+        from albums;
     else
         return query select ceil(count(album_id)::float / 8)::int as pages 
         from albums

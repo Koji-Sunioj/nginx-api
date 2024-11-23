@@ -178,11 +178,38 @@ async def create_album(request: Request):
 
 @ admin.get("/artists")
 @ db_functions.tsql
-async def admin_get_artists():
-    command = "select name,artist_id from artists order by name asc;"
-    cursor.execute(command)
-    artists = cursor.fetchall()
-    return JSONResponse({"artists": artists})
+async def admin_get_artists(page: int = None, sort: str = None, direction: str = None, query: str = None):
+    print(page, sort, direction, query)
+
+    response = {}
+
+    if all([page, sort, direction]):
+        new_offset = (page - 1) * 8
+        order_by = {"descending": "desc", "ascending": "asc"}[direction]
+        filter_by = " where lower(name) like '%%%s%%' " % query if query != None else ""
+
+        artists_cmd = """
+        select name,bio,count(album_id) as albums 
+        from artists join albums on 
+        albums.artist_id = artists.artist_id %s
+        group by artists.name,artists.bio 
+        order by %s %s limit 8 offset %s;""" % (filter_by, sort, order_by, new_offset)
+        cursor.execute(artists_cmd)
+        response["artists"] = cursor.fetchall()
+
+        pages_cmd = """
+        select ceil(count(artist_id)::float / 8)::int 
+        as pages from artists %s;
+        """ % filter_by
+        cursor.execute(pages_cmd)
+        response["pages"] = cursor.fetchone()["pages"]
+
+    else:
+        command = "select name,artist_id from artists order by name asc;"
+        cursor.execute(command)
+        response["artists"] = cursor.fetchall()
+
+    return JSONResponse(response, 200)
 
 
 @ api.get("/artist/{artist_name}")
