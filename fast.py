@@ -189,10 +189,11 @@ async def admin_get_artists(page: int = None, sort: str = None, direction: str =
         filter_by = " where lower(name) like '%%%s%%' " % query if query != None else ""
 
         artists_cmd = """
-        select name,bio,count(album_id) as albums 
+        select artists.name,artists.bio,artists.modified::varchar,
+        count(album_id) as albums 
         from artists join albums on 
         albums.artist_id = artists.artist_id %s
-        group by artists.name,artists.bio 
+        group by artists.name,artists.bio,artists.modified 
         order by %s %s limit 8 offset %s;""" % (filter_by, sort, order_by, new_offset)
         cursor.execute(artists_cmd)
         response["artists"] = cursor.fetchall()

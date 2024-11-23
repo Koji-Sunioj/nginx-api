@@ -5,7 +5,8 @@ create database blackmetal;
 create table artists (
     artist_id serial primary key,
     name varchar unique,
-    bio varchar
+    bio varchar,
+    modified timestamp default timezone('utc', now()),
 );
 
 alter sequence artists_artist_id_seq restart with 100;
