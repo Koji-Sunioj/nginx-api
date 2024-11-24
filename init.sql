@@ -157,6 +157,27 @@ $$
     where lower(name) like '%' || $1 || '%' group by artists.artist_id;
 $$ language sql;
 
+
+create function get_artist(in artist_name varchar,in view varchar,out artist json) returns setof json as
+$$
+begin
+    case view
+        when 'user' then 
+            return query select json_build_object('name',artists.name,'bio',artists.bio,
+            'albums',json_agg(json_build_object('title',albums.title,'name',artists.name,
+            'release_year',albums.release_year,'photo',albums.photo,'stock',albums.stock,
+            'price',albums.price::float))) as artist from albums 
+            join artists on artists.artist_id = albums.artist_id 
+            where lower(artists.name) = $1 group by artists.artist_id;
+        when 'admin' then
+            return query select json_build_object('artist_id',artists.artist_id,'name', 
+            artists.name,'bio', artists.bio ) as artist 
+            from artists where lower(artists.name) = $1;
+    end case;
+end
+$$ language plpgsql;
+
+
 create function get_user(in api_username varchar,in task varchar,out bm_user json) 
 returns setof json as 
 $$

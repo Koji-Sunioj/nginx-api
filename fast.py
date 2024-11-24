@@ -179,7 +179,6 @@ async def create_album(request: Request):
 @ admin.get("/artists")
 @ db_functions.tsql
 async def admin_get_artists(page: int = None, sort: str = None, direction: str = None, query: str = None):
-    print(page, sort, direction, query)
 
     response = {}
 
@@ -215,11 +214,11 @@ async def admin_get_artists(page: int = None, sort: str = None, direction: str =
 
 @ api.get("/artist/{artist_name}")
 @ db_functions.tsql
-async def get_artist(artist_name):
+async def get_artist(artist_name, view: str):
     artist_name = re.sub("\-", " ", artist_name).replace("'", "''")
-    cursor.callproc("get_artist", (artist_name,))
+    cursor.callproc("get_artist", (artist_name, view))
     artist = cursor.fetchone()
-    return JSONResponse({"artist": artist}, 200)
+    return JSONResponse(artist, 200)
 
 
 @ api.get("/albums/{artist_name}/{album_name}")
