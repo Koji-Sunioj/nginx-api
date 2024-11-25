@@ -149,15 +149,6 @@ $$
     where artists.artist_id = $1) existing_albums) as existing_albums;
 $$ language sql;
 
-create function get_artist(in artist_name varchar,out name varchar,out bio varchar,out albums json) as
-$$
-    select name, bio, json_agg(json_build_object('title',title,'name',name,'release_year',release_year,
-    'photo',photo,'stock',stock,'price',price::float)) as albums from albums 
-    join artists on artists.artist_id = albums.artist_id 
-    where lower(name) like '%' || $1 || '%' group by artists.artist_id;
-$$ language sql;
-
-
 create function get_artist(in artist_name varchar,in view varchar,out artist json) returns setof json as
 $$
 begin

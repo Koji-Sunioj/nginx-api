@@ -1,15 +1,13 @@
 import re
 import os
 import db_functions
+from utils import *
 from jose import jwt
 from db_functions import cursor
 from dotenv import dotenv_values
-from typing import Annotated
 from passlib.context import CryptContext
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
-from utils import *
-# verify_token, verify_admin_token, decode_role, encode_role, decode_token, save_file, form_songs_to_list, get_track, songs_to_matrix, db_ready_file
 from datetime import timedelta, datetime, timezone
 from fastapi import FastAPI, APIRouter, Request, Response, Depends
 
@@ -62,8 +60,36 @@ async def delete_album(album_id):
     return JSONResponse({"detail": detail}, 200)
 
 
-@admin.post("/albums")
-@db_functions.tsql
+@ admin.post("/artists")
+@ db_functions.tsql
+async def create_artist(request: Request):
+    response = {"detail": None}
+    form = await request.form()
+
+    cursor.callproc("get_artist", (form["artist"].lower(), "admin"))
+    exsting_artist = cursor.fetchone()
+
+    new_artist_exists = form["action"] == "new" and exsting_artist != None
+
+    if new_artist_exists:
+        return JSONResponse({"detail": "that artist exists"}, 409)
+
+    match form["action"]:
+        case "new":
+            insert_cmd = "insert into artists (name,bio) values (%s,%s) returning name;"
+            cursor.execute(insert_cmd, (form["artist"], form["biography"]))
+            inserted_name = cursor.fetchone()["name"]
+            response["detail"] = "artist %s created" % inserted_name
+            response["name"] = inserted_name
+
+        case "edit":
+            print("hey")
+
+    return JSONResponse(response, 200)
+
+
+@ admin.post("/albums")
+@ db_functions.tsql
 async def create_album(request: Request):
     form = await request.form()
     response = {"detail": None}
