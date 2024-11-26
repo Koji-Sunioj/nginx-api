@@ -136,14 +136,14 @@ $$
     group by orders.order_id) orders ) AS orders;
 $$ language sql;
 
-create function get_artist_f_id(in artist_id int,out name varchar,out albums json) as
+create function get_artist_via_id(in artist_id int,out artist json,out albums json) as
 $$
     select  
-    (select name from (select artists.name from artists where artists.artist_id = $1) sub), 
-    albums from 
+    (select json_build_object('name',artists.name,'bio',artists.bio) 
+    from artists where artists.artist_id = $1) sub, albums from 
     (select coalesce(json_agg(existing_albums),'[]')  
     as albums from 
-    (select album_id,title 
+    (select album_id,title,photo 
     from albums join artists on  
     artists.artist_id = albums.artist_id  
     where artists.artist_id = $1) existing_albums) as existing_albums;
@@ -244,7 +244,7 @@ create function update_songs(in existing_tracks int[],in existing_album_ids int[
     in new_durations int[],in new_songs varchar[])
 returns void as 
 $$
-    update songs 
+    update albums 
     set song = new_songs.song,
     	duration = new_songs.duration
     from (select 
@@ -255,6 +255,20 @@ $$
     where new_songs.album_id=songs.album_id
     and new_songs.track=songs.track;
 $$ language sql;
+
+
+create function update_photos(in existing_album_ids int[],in photos varchar[])
+returns void as 
+$$
+    update albums 
+    set photo = new_photos.photo,
+    	modified = now() at time zone 'utc'
+    from (select 
+		unnest($1) as album_id,
+		unnest($2) as photo) as new_photos
+    where new_photos.album_id=albums.album_id;
+$$ language sql;
+
 
 create function insert_songs(in tracks_ids int[],in album_ids int[],
     in durations int[],in new_songs varchar[]) 
@@ -349,9 +363,24 @@ $$
     from inserted join artists on artists.artist_id = inserted.artist_id;
 $$ language sql;
 
+create function update_artist(in artist_id int,in api_name varchar,in bio varchar) 
+returns table (
+    name varchar
+) as 
+$$
+declare
+    set_name varchar:= ' name = '''||$2||'''';
+    set_bio varchar:= ' bio = '''||$3||'''';
+    set_modified varchar:= ' modified = now() at time zone ''utc''';
+    sets varchar[] := array[set_name,set_bio,set_modified];
+begin
+    return query execute 'update artists set '||array_to_string(sets, ',')||' where artist_id='||$1||' returning name;';
+end
+$$ language plpgsql;
+
 create function update_album(in album_id int,in title varchar,in release_year int,
-    in price double precision,in artist_id int,in photo varchar)
-returns void as 
+    in price double precision,in artist_id int,in photo varchar) 
+    returns void as 
 $$
 declare 
 	set_title varchar:= ' title = '''||$2||'''';
@@ -360,7 +389,7 @@ declare
 	set_artist_id varchar:= ' artist_id = '||$5||'';
 	set_photo varchar:= ' photo = '''||$6||'''';
 	set_modified varchar:= ' modified = now() at time zone ''utc''';
-sets varchar[] := array[set_title,set_release_year,set_price,set_photo,set_artist_id,set_modified];
+    sets varchar[] := array[set_title,set_release_year,set_price,set_photo,set_artist_id,set_modified];
 begin  
 	execute 'update albums set '||array_to_string(sets, ',')||' where album_id='||$1||';';
 end

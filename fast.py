@@ -66,24 +66,50 @@ async def create_artist(request: Request):
     response = {"detail": None}
     form = await request.form()
 
-    cursor.callproc("get_artist", (form["artist"].lower(), "admin"))
+    cursor.callproc("get_artist", (form["name"].lower(), "admin"))
     exsting_artist = cursor.fetchone()
 
     new_artist_exists = form["action"] == "new" and exsting_artist != None
+    edit_artist_exists = form["action"] == "edit" and exsting_artist != None and str(
+        exsting_artist["artist"]["artist_id"]) != form["artist_id"]
 
-    if new_artist_exists:
+    if any([new_artist_exists, edit_artist_exists]):
         return JSONResponse({"detail": "that artist exists"}, 409)
 
     match form["action"]:
         case "new":
             insert_cmd = "insert into artists (name,bio) values (%s,%s) returning name;"
-            cursor.execute(insert_cmd, (form["artist"], form["biography"]))
+            cursor.execute(insert_cmd, (form["artist"], form["bio"]))
             inserted_name = cursor.fetchone()["name"]
             response["detail"] = "artist %s created" % inserted_name
             response["name"] = inserted_name
-
         case "edit":
-            print("hey")
+            cursor.callproc("get_artist_via_id", (form["artist_id"],))
+            data = cursor.fetchone()
+            artist, albums = data["artist"], data["albums"]
+
+            fields_to_change = {field: form[field] if str(artist[field]) != form[field] else None for field in [
+                "name", "bio"]}
+
+            if fields_to_change["name"] != None:
+                new_files = [{"album_id": album["album_id"], "new_file": db_ready_file(
+                    form["name"], album["title"], album["photo"]), "old_file": album["photo"]} for album in albums]
+
+                photo_matrix = dict_list_to_matrix(new_files)[:-1]
+                cursor.callproc("update_photos", (*photo_matrix,))
+
+                for file in new_files:
+                    new_file = "/var/www/blackmetal/common/%s" % file["new_file"]
+                    old_file = "/var/www/blackmetal/common/%s" % file["old_file"]
+                    os.rename(old_file, new_file)
+
+            if any(fields_to_change.values()):
+                cursor.callproc(
+                    "update_artist", (form["artist_id"], * fields_to_change.values()))
+
+                updated = cursor.fetchone()
+                response["detail"] = "artist %s updated" % updated["name"]
+                response["name"] = updated["name"]
 
     return JSONResponse(response, 200)
 
@@ -94,7 +120,7 @@ async def create_album(request: Request):
     form = await request.form()
     response = {"detail": None}
 
-    cursor.callproc("get_artist_f_id", (form["artist_id"],))
+    cursor.callproc("get_artist_via_id", (form["artist_id"],))
     existing_albums = cursor.fetchone()
 
     edit_album_exists = form["action"] == "edit" and len(
@@ -107,7 +133,7 @@ async def create_album(request: Request):
         return JSONResponse({"detail": "that album exists"}, 409)
 
     filename = db_ready_file(
-        existing_albums["name"], form["title"], form["photo"].filename)
+        existing_albums["artist"]["name"], form["title"], form["photo"].filename)
 
     match form['action']:
         case "edit":
@@ -147,13 +173,13 @@ async def create_album(request: Request):
                     "delete_songs", (form["album_id"], to_delete_tracks))
 
             if should_update_tracks:
-                updated_matrix = songs_to_matrix(to_update_tracks)
+                updated_matrix = dict_list_to_matrix(to_update_tracks)
                 cursor.callproc("update_songs", (*updated_matrix,))
 
             if should_add_tracks:
                 filtered = [
                     track for track in new_songs if track["track"] in to_add_tracks]
-                inserted_matrix = songs_to_matrix(filtered)
+                inserted_matrix = dict_list_to_matrix(filtered)
                 cursor.callproc(
                     "insert_songs", (* inserted_matrix,))
 
@@ -192,7 +218,7 @@ async def create_album(request: Request):
             inserted = cursor.fetchone()
 
             new_songs = form_songs_to_list(form, inserted["album_id"])
-            inserted_matrix = songs_to_matrix(new_songs)
+            inserted_matrix = dict_list_to_matrix(new_songs)
             cursor.callproc("insert_songs", (* inserted_matrix,))
 
             response.update(
@@ -216,7 +242,8 @@ async def admin_get_artists(page: int = None, sort: str = None, direction: str =
         artists_cmd = """
         select artists.name,artists.bio,artists.modified::varchar,
         count(album_id) as albums 
-        from artists join albums on 
+        from artists 
+        left join albums on 
         albums.artist_id = artists.artist_id %s
         group by artists.name,artists.bio,artists.modified 
         order by %s %s limit 8 offset %s;""" % (filter_by, sort, order_by, new_offset)

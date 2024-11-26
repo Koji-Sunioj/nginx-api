@@ -23,8 +23,8 @@ def save_file(filename, content):
     new_photo.close()
 
 
-def songs_to_matrix(songs):
-    init_matrix = [list(array.values()) for array in songs]
+def dict_list_to_matrix(dict_list):
+    init_matrix = [list(array.values()) for array in dict_list]
     reshaped = [list(n) for n in zip(*init_matrix)]
     return reshaped
 
