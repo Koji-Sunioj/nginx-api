@@ -92,7 +92,7 @@ async def create_artist(request: Request):
                 "name", "bio"]}
 
             if fields_to_change["name"] != None:
-                new_files = [{"album_id": album["album_id"], "new_file": db_ready_file(
+                new_files = [{"album_id": album["album_id"], "new_file": bm_format_photoname(
                     form["name"], album["title"], album["photo"]), "old_file": album["photo"]} for album in albums]
 
                 photo_matrix = dict_list_to_matrix(new_files)[:-1]
@@ -132,8 +132,10 @@ async def create_album(request: Request):
     if any([new_album_exists, edit_album_exists]):
         return JSONResponse({"detail": "that album exists"}, 409)
 
-    filename = db_ready_file(
+    filename = bm_format_photoname(
         existing_albums["artist"]["name"], form["title"], form["photo"].filename)
+
+    print(filename)
 
     match form['action']:
         case "edit":
@@ -167,6 +169,8 @@ async def create_album(request: Request):
             should_update_album = any(fields_to_change.values())
             photo_not_same = filename != album["photo"] and form["photo"].size != os.stat(
                 "/var/www/blackmetal/common/%s" % album["photo"]).st_size
+            should_rename_photo = any(
+                [fields_to_change["artist_id"], fields_to_change["title"]]) and not photo_not_same
 
             if should_del_tracks:
                 cursor.callproc(
@@ -186,15 +190,20 @@ async def create_album(request: Request):
             if photo_not_same:
                 content = form["photo"].file.read()
                 save_file(filename, content)
-                fields_to_change["photo"] = filename
                 os.remove("/var/www/blackmetal/common/%s" % album["photo"])
+                fields_to_change["photo"] = filename
+                should_update_album = True
+
+            if should_rename_photo:
+                new_file = "/var/www/blackmetal/common/%s" % filename
+                old_file = "/var/www/blackmetal/common/%s" % album["photo"]
+                os.rename(old_file, new_file)
+                fields_to_change["photo"] = filename
                 should_update_album = True
 
             if should_update_album:
                 cursor.callproc(
                     "update_album", (form["album_id"], * fields_to_change.values()))
-
-                print(cursor.query)
 
             if any([should_del_tracks, should_add_tracks, should_update_tracks, should_update_album, photo_not_same]):
                 cursor.callproc("update_modified", (form["album_id"],))
