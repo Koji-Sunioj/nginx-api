@@ -22,7 +22,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 fe_secret = dotenv_values(".env")["FE_SECRET"]
 
 
-@auth.post("/check-token/admin")
+@ auth.post("/check-token/admin")
 async def check_admin_token(request: Request, response: Response):
     try:
         jwt_payload = await decode_token(request)
@@ -34,7 +34,7 @@ async def check_admin_token(request: Request, response: Response):
     return response
 
 
-@auth.post("/check-token")
+@ auth.post("/check-token")
 async def check_token(request: Request, response: Response):
     try:
         await decode_token(request)
@@ -45,12 +45,12 @@ async def check_token(request: Request, response: Response):
     return response
 
 
-@admin.delete("/albums/{album_id}")
-@db_functions.tsql
+@ admin.delete("/albums/{album_id}")
+@ db_functions.tsql
 async def delete_album(album_id):
     detail = "there was nothing to delete"
     cursor.callproc(
-        "get_album", ("id", None, None, album_id))
+        "get_album", ("album_id", None, album_id))
     album = cursor.fetchone()["album"]
     del_command = "delete from albums where album_id = %s"
     cursor.execute(del_command, (album_id,))
@@ -66,34 +66,32 @@ async def create_artist(request: Request):
     response = {"detail": None}
     form = await request.form()
 
-    cursor.callproc("get_artist", (form["name"].lower(), "admin"))
-    exsting_artist = cursor.fetchone()
-
-    new_artist_exists = form["action"] == "new" and exsting_artist != None
-    edit_artist_exists = form["action"] == "edit" and exsting_artist != None and str(
-        exsting_artist["artist"]["artist_id"]) != form["artist_id"]
-
-    if any([new_artist_exists, edit_artist_exists]):
-        return JSONResponse({"detail": "that artist exists"}, 409)
-
     match form["action"]:
         case "new":
-            insert_cmd = "insert into artists (name,bio) values (%s,%s) returning name;"
-            cursor.execute(insert_cmd, (form["artist"], form["bio"]))
-            inserted_name = cursor.fetchone()["name"]
-            response["detail"] = "artist %s created" % inserted_name
-            response["name"] = inserted_name
+            insert_cmd = "insert into artists (name,bio) values (%s,%s) returning artist_id,name;"
+            cursor.execute(insert_cmd, (form["name"], form["bio"]))
+            new_artist = cursor.fetchone()
+            response["detail"] = "artist %s created" % new_artist["name"]
+            response["artist_id"] = new_artist["artist_id"]
+
         case "edit":
-            cursor.callproc("get_artist_via_id", (form["artist_id"],))
-            data = cursor.fetchone()
-            artist, albums = data["artist"], data["albums"]
+            cursor.callproc("get_artist", (form["artist_id"], "user"))
+            artist = cursor.fetchone()["artist"]
 
             fields_to_change = {field: form[field] if str(artist[field]) != form[field] else None for field in [
                 "name", "bio"]}
 
+            if any(fields_to_change.values()):
+                cursor.callproc(
+                    "update_artist", (form["artist_id"], * fields_to_change.values()))
+
+                updated = cursor.fetchone()
+                response["detail"] = "artist %s updated" % updated["name"]
+                response["artist_id"] = updated["artist_id"]
+
             if fields_to_change["name"] != None:
                 new_files = [{"album_id": album["album_id"], "new_file": bm_format_photoname(
-                    form["name"], album["title"], album["photo"]), "old_file": album["photo"]} for album in albums]
+                    form["name"], album["title"], album["photo"]), "old_file": album["photo"]} for album in artist["albums"]]
 
                 photo_matrix = dict_list_to_matrix(new_files)[:-1]
                 cursor.callproc("update_photos", (*photo_matrix,))
@@ -102,14 +100,6 @@ async def create_artist(request: Request):
                     new_file = "/var/www/blackmetal/common/%s" % file["new_file"]
                     old_file = "/var/www/blackmetal/common/%s" % file["old_file"]
                     os.rename(old_file, new_file)
-
-            if any(fields_to_change.values()):
-                cursor.callproc(
-                    "update_artist", (form["artist_id"], * fields_to_change.values()))
-
-                updated = cursor.fetchone()
-                response["detail"] = "artist %s updated" % updated["name"]
-                response["name"] = updated["name"]
 
     return JSONResponse(response, 200)
 
@@ -120,27 +110,25 @@ async def create_album(request: Request):
     form = await request.form()
     response = {"detail": None}
 
-    cursor.callproc("get_artist_via_id", (form["artist_id"],))
-    existing_albums = cursor.fetchone()
+    cursor.callproc("get_artist", (form["artist_id"], "user"))
+    artist = cursor.fetchone()["artist"]
 
     edit_album_exists = form["action"] == "edit" and len(
-        [album for album in existing_albums["albums"] if album["album_id"] != int(form['album_id']) and album["title"] == form["title"]]) > 0
+        [album for album in artist["albums"] if album["album_id"] != int(form['album_id']) and album["title"].lower() == form["title"].lower()]) > 0
 
-    new_album_exists = form["action"] == "new" and form["title"] in [
-        row["title"] for row in existing_albums["albums"]]
+    new_album_exists = form["action"] == "new" and form["title"].lower() in [
+        row["title"].lower() for row in artist["albums"]]
 
     if any([new_album_exists, edit_album_exists]):
         return JSONResponse({"detail": "that album exists"}, 409)
 
     filename = bm_format_photoname(
-        existing_albums["artist"]["name"], form["title"], form["photo"].filename)
-
-    print(filename)
+        artist["name"], form["title"], form["photo"].filename)
 
     match form['action']:
         case "edit":
             cursor.callproc(
-                "get_album", ("id", None, None, form['album_id']))
+                "get_album", ("album_id", None, form['album_id']))
 
             data = cursor.fetchone()
             album, songs = data["album"], data["songs"]
@@ -172,9 +160,12 @@ async def create_album(request: Request):
             should_rename_photo = any(
                 [fields_to_change["artist_id"], fields_to_change["title"]]) and not photo_not_same
 
+            update = 0
+
             if should_del_tracks:
                 cursor.callproc(
                     "delete_songs", (form["album_id"], to_delete_tracks))
+                update += 1
 
             if should_update_tracks:
                 updated_matrix = dict_list_to_matrix(to_update_tracks)
@@ -209,9 +200,9 @@ async def create_album(request: Request):
                 cursor.callproc("update_modified", (form["album_id"],))
                 updated_album = cursor.fetchone()
                 response.update(
-                    {"title": updated_album["title"], "name": updated_album["name"]})
+                    {"title": updated_album["title"], "artist_id": updated_album["artist_id"]})
 
-                response["detail"] = "album %s updated" % response["title"]
+                response["detail"] = "album %s updated" % updated_album["title"]
             else:
                 response["detail"] = "there was nothing to update"
 
@@ -231,7 +222,7 @@ async def create_album(request: Request):
             cursor.callproc("insert_songs", (* inserted_matrix,))
 
             response.update(
-                {"title": inserted["title"], "name": inserted["name"]})
+                {"title": inserted["title"], "artist_id": inserted["artist_id"]})
             response["detail"] = "album %s created" % inserted["title"]
 
     return JSONResponse(response, 200)
@@ -249,12 +240,12 @@ async def admin_get_artists(page: int = None, sort: str = None, direction: str =
         filter_by = " where lower(name) like '%%%s%%' " % query if query != None else ""
 
         artists_cmd = """
-        select artists.name,artists.bio,artists.modified::varchar,
+        select artists.artist_id,artists.name,artists.bio,artists.modified::varchar,
         count(album_id) as albums 
         from artists 
         left join albums on 
         albums.artist_id = artists.artist_id %s
-        group by artists.name,artists.bio,artists.modified 
+        group by artists.artist_id,artists.name,artists.bio,artists.modified 
         order by %s %s limit 8 offset %s;""" % (filter_by, sort, order_by, new_offset)
         cursor.execute(artists_cmd)
         response["artists"] = cursor.fetchall()
@@ -274,21 +265,29 @@ async def admin_get_artists(page: int = None, sort: str = None, direction: str =
     return JSONResponse(response, 200)
 
 
-@ api.get("/artist/{artist_name}")
+@ admin.delete("/artists/{artist_id}")
 @ db_functions.tsql
-async def get_artist(artist_name, view: str):
-    artist_name = re.sub("\-", " ", artist_name).replace("'", "''")
-    cursor.callproc("get_artist", (artist_name, view))
+async def delete_artist(artist_id):
+    del_cmd = "delete from artists where artist_id = %s returning name;"
+    cursor.execute(del_cmd, (artist_id,))
+    name = cursor.fetchone()["name"]
+    detail = "artist %s deleted" % name
+    return JSONResponse({"detail": detail}, 200)
+
+
+@ api.get("/artists/{artist_id}")
+@ db_functions.tsql
+async def get_artist(artist_id, view: str):
+    cursor.callproc("get_artist", (artist_id, view))
     artist = cursor.fetchone()
     return JSONResponse(artist, 200)
 
 
-@ api.get("/albums/{artist_name}/{album_name}")
+@ api.get("/artists/{artist_id}/album/{album_name}")
 @ db_functions.tsql
-async def get_album(artist_name, album_name, request: Request, cart: str = None):
-    artist_name = re.sub("\-", " ", artist_name)
+async def get_album(artist_id, album_name, request: Request, cart: str = None):
     album_name = re.sub("\-", " ", album_name)
-    cursor.callproc("get_album", ("from-uri", artist_name, album_name, None))
+    cursor.callproc("get_album", ("artist_id", album_name, artist_id))
     album = cursor.fetchone()
 
     try:

@@ -4,10 +4,13 @@ create database blackmetal;
 
 create table artists (
     artist_id serial primary key,
-    name varchar unique,
+    name varchar,
     bio varchar,
     modified timestamp default timezone('utc', now()),
 );
+
+create unique index artist_id_name
+on artists(artist_id, name);
 
 alter sequence artists_artist_id_seq restart with 100;
 
@@ -79,26 +82,26 @@ grant usage on schema public to bm_admin;
 grant select, insert, update, delete on all tables in schema public to bm_admin;
 grant usage, select on all sequences in schema public to bm_admin;
 
-create function get_album(in id_type varchar,in artist_name varchar, in album_name varchar,in artist_id int,out album json, out songs json) 
+create function get_album(in id_type varchar, in album_name varchar,in identifier int,out album json, out songs json) 
 returns setof record as 
 $$
 begin
     case id_type
-        when 'id' then
+        when 'album_id' then
             return query select json_build_object('album_id',albums.album_id,'artist_id',artists.artist_id,'name',name,
             'title', title, 'release_year',release_year,'photo', photo,'stock',stock,'price',price::float) as album,
             json_agg(json_build_object('track',track,'song',song,'duration',duration) order by track)  as songs
             from albums join artists on artists.artist_id = albums.artist_id
             join songs on songs.album_id = albums.album_id 
-            where albums.album_id = $4 
+            where albums.album_id = $3 
             group by albums.album_id,artists.artist_id,name;
-        when 'from-uri' then
+        when 'artist_id' then
             return query select json_build_object('album_id',albums.album_id,'artist_id',artists.artist_id,'name',name,
             'title', title, 'release_year',release_year,'photo', photo,'stock',stock,'price',price::float) as album,
             json_agg(json_build_object('track',track,'song',song,'duration',duration) order by track)  as songs
             from albums join artists on artists.artist_id = albums.artist_id
             join songs on songs.album_id = albums.album_id 
-            where lower(name) = $2 and lower(title) = $3 
+            where artists.artist_id = $3 and lower(title) = $2 
             group by albums.album_id,artists.artist_id,name;
     end case;
 end
@@ -115,25 +118,26 @@ create function get_orders_and_cart(in username varchar, out cart json, out orde
 $$
     select cart, orders from
     (select json_build_object('balance',sum(cart.quantity * albums.price),
-    'albums',json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
-    artists.name,'quantity',cart.quantity,'price',albums.price))) as cart from cart
+    'albums',json_agg(json_build_object('artist_id',artists.artist_id,
+	'photo',albums.photo,'title',albums.title,'artist',artists.name,
+	'quantity',cart.quantity,'price',albums.price))) as cart from cart
     join albums on albums.album_id = cart.album_id
     join artists on artists.artist_id = albums.artist_id
     join users on users.user_id = cart.user_id
-    where users.username = $1) AS cart,
-
+    where users.username = 'varg_vikernes') as cart,
     (select coalesce(json_agg(orders),'[]') as orders from (select 
     json_build_object('order_id',orders.order_id,'dispatched',orders.dispatched,
     'balance',sum(orders_bridge.quantity * albums.price),'albums',
-    json_agg(json_build_object('photo',albums.photo,'title',albums.title,'artist',
-    artists.name,'quantity',orders_bridge.quantity,'price',albums.price))) as orders
+    json_agg(json_build_object('artist_id',artists.artist_id,'photo',albums.photo,
+	'title',albums.title,'artist',artists.name,'quantity',orders_bridge.quantity,
+	'price',albums.price))) as orders
     from orders
     join orders_bridge on orders_bridge.order_id = orders.order_id
     join albums on albums.album_id = orders_bridge.album_id
     join artists on artists.artist_id = albums.artist_id
     join users on users.user_id = orders.user_id
-    where users.username = $1
-    group by orders.order_id) orders ) AS orders;
+    where users.username = 'varg_vikernes'
+    group by orders.order_id order by orders.order_id desc) orders ) as orders;
 $$ language sql;
 
 create function get_artist_via_id(in artist_id int,out artist json,out albums json) as
@@ -149,25 +153,26 @@ $$
     where artists.artist_id = $1) existing_albums) as existing_albums;
 $$ language sql;
 
-create function get_artist(in artist_name varchar,in view varchar,out artist json) returns setof json as
+
+create function get_artist(in artist_id int,in view varchar,out artist json) returns setof json as
 $$
 begin
     case view
         when 'user' then 
             return query select json_build_object('name',artists.name,'bio',artists.bio,
-            'albums',json_agg(json_build_object('title',albums.title,'name',artists.name,
-            'release_year',albums.release_year,'photo',albums.photo,'stock',albums.stock,
-            'price',albums.price::float))) as artist from albums 
+			'albums',json_agg(json_build_object('album_id',albums.album_id,'artist_id',
+			artists.artist_id,'title',albums.title,'name',artists.name,'release_year',
+			albums.release_year,'photo',albums.photo,'stock',albums.stock,'price',
+			albums.price::float))) as artist from albums 
             join artists on artists.artist_id = albums.artist_id 
-            where lower(artists.name) = $1 group by artists.artist_id;
+            where artists.artist_id = $1 group by artists.artist_id;
         when 'admin' then
             return query select json_build_object('artist_id',artists.artist_id,'name', 
             artists.name,'bio', artists.bio ) as artist 
-            from artists where lower(artists.name) = $1;
+            from artists where artists.artist_id = $1;
     end case;
 end
 $$ language plpgsql;
-
 
 create function get_user(in api_username varchar,in task varchar,out bm_user json) 
 returns setof json as 
@@ -191,8 +196,9 @@ begin
         when 'checkout' then
             return query select json_build_object('user_id',users.user_id,'albums',
             json_agg(json_build_object('album_id',album_id,'quantity',quantity))) as bm_user
-            from cart 
-            join users on users.username = $1 
+            from cart
+            join users on users.user_id = cart.user_id
+            where users.username = $1
             group by users.user_id;
     end case;
 end
@@ -215,6 +221,7 @@ $$ language plpgsql;
 
 create function get_albums(in page int,in sort varchar,in direction varchar,in query varchar default null)
 returns table (
+    artist_id smallint,
     photo varchar,
     title varchar,
     name varchar, 
@@ -229,8 +236,8 @@ new_offset smallint := ($1 - 1) * 8;
 new_query varchar := ' where lower(name) like lower(''%' || $4 || '%'') or lower(title) like lower(''%' || $4 || '%'')';
 begin  
     return query execute '
-    select albums.photo,albums.title,artists.name,albums.stock, albums.release_year, 
-    albums.price::float, albums.modified::varchar
+    select albums.artist_id,albums.photo,albums.title,artists.name,albums.stock,
+    albums.release_year,albums.price::float, albums.modified::varchar
     from albums
     join artists on artists.artist_id = albums.artist_id'
     || case when $4 is not null then new_query else ' ' end || 
@@ -344,27 +351,28 @@ $$
     where sub.album_id = albums.album_id returning albums.stock as remaining, sub.quantity as cart;
 $$ language sql;
 
-create function update_modified(in album_id int,out name varchar,out title varchar) as
+create function update_modified(in album_id int,out artist_id int,out title varchar) as
 $$  
     with updated as (
     update albums set modified = now() at time zone 'utc'
     where album_id = $1 returning *)
-    select name,title from updated join artists on artists.artist_id = updated.artist_id;
+    select artists.artist_id,title from updated join artists on artists.artist_id = updated.artist_id;
 $$ language sql;
 
 create function insert_album(in title varchar,in release_year int,in price double precision,
-    in photo varchar,in artist_id int,out album_id int,out name varchar,out title varchar) 
+    in photo varchar,in artist_id int,out album_id int,out artist_id int,out title varchar) 
 as
 $$
     with inserted as 
     (insert into albums (title,release_year,price,photo,artist_id) 
     values ($1,$2,$3,$4,$5) returning *) 
-    select album_id,name,title
+    select album_id,artists.artist_id,title
     from inserted join artists on artists.artist_id = inserted.artist_id;
 $$ language sql;
 
-create function update_artist(in artist_id int,in api_name varchar,in bio varchar) 
+create function update_artist(in api_artist_id int,in api_name varchar,in bio varchar) 
 returns table (
+    artist_id int,
     name varchar
 ) as 
 $$
@@ -374,7 +382,7 @@ declare
     set_modified varchar:= ' modified = now() at time zone ''utc''';
     sets varchar[] := array[set_name,set_bio,set_modified];
 begin
-    return query execute 'update artists set '||array_to_string(sets, ',')||' where artist_id='||$1||' returning name;';
+    return query execute 'update artists set '||array_to_string(sets, ',')||' where artist_id='||$1||' returning artist_id,name;';
 end
 $$ language plpgsql;
 
