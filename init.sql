@@ -140,19 +140,6 @@ $$
     group by orders.order_id order by orders.order_id desc) orders ) as orders;
 $$ language sql;
 
-create function get_artist_via_id(in artist_id int,out artist json,out albums json) as
-$$
-    select  
-    (select json_build_object('name',artists.name,'bio',artists.bio) 
-    from artists where artists.artist_id = $1) sub, albums from 
-    (select coalesce(json_agg(existing_albums),'[]')  
-    as albums from 
-    (select album_id,title,photo 
-    from albums join artists on  
-    artists.artist_id = albums.artist_id  
-    where artists.artist_id = $1) existing_albums) as existing_albums;
-$$ language sql;
-
 
 create function get_artist(in artist_id int,in view varchar,out artist json) returns setof json as
 $$
