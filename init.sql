@@ -191,18 +191,67 @@ begin
 end
 $$ language plpgsql;
 
-create function get_pages(in query varchar default null,out pages int) returns setof int as 
+create function get_pages(in scope varchar, in query varchar default null,out pages int) returns setof int as 
 $$
 begin
-    if $1 is null then
-        return query select ceil(count(album_id)::float / 8)::int as pages 
-        from albums;
-    else
-        return query select ceil(count(album_id)::float / 8)::int as pages 
-        from albums
-        join artists on artists.artist_id = albums.artist_id 
-        where lower(name) like '%' || $1 || '%'  or lower(title) like '%' || $1 || '%';
-    end if;
+    case scope
+        when 'albums' then
+            if $2 is null then
+                return query select ceil(count(album_id)::float / 8)::int as pages 
+                from albums;
+            else
+                return query select ceil(count(album_id)::float / 8)::int as pages 
+                from albums
+                join artists on artists.artist_id = albums.artist_id 
+                where lower(name) like lower('%' || $2 || '%')  or lower(title) like lower('%' || $2 || '%') ;
+            end if;
+        when 'artists' then
+            if $2 is null then
+                return query select ceil(count(artist_id)::float / 8)::int as pages 
+                from artists;
+            else
+                return query select ceil(count(artist_id)::float / 8)::int as pages 
+                from artists where lower(name) like lower('%' || $2 || '%');
+            end if;
+    end case;
+end
+$$ language plpgsql;
+
+
+create function create_artist(in name varchar, in bio varchar,out name varchar,out artist_id int) as
+$$
+    insert into artists (name,bio) values ($1,$2) returning name,artist_id;
+$$ language sql;
+
+
+create or replace function get_artists(in page int default null,in sort varchar default null,in direction varchar default null,in query varchar default null,out artists json)
+returns setof json as 
+$$
+declare 
+has_params boolean := false = all(select unnest(array[$1::varchar,$2,$3]) is null);
+new_offset smallint := ($1 - 1) * 8;
+new_query varchar := ' where lower(name) like lower(''%' || $4 || '%'') ';
+begin  
+	if has_params then
+    return query execute
+        'select json_agg(
+	        json_build_object(''artist_id'',s.artist_id,''name'',s.name,
+		        ''bio'',s.bio,''modified'',s.modified,''albums'',s.albums)) as artists
+        from (select 
+		        artists.artist_id,
+		        artists.name,artists.bio,
+		        artists.modified::varchar,
+		        count(album_id) as albums 
+	        from artists left join albums on 
+	        albums.artist_id = artists.artist_id'
+            || case when $4 is not null then new_query else ' ' end ||  
+	        'group by artists.artist_id order by'
+            || case $3 when 'ascending' then format(' %s asc ',$2) when 'descending' then format(' %s desc ',$2) end || 
+            format('limit 8 offset %s',new_offset) || ') as s'; 
+	else
+		return query execute
+		'select json_agg(json_build_object(''name'',name,''artist_id'',artist_id)order by name asc) as artists from artists;';			 
+	end if;
 end
 $$ language plpgsql;
 
