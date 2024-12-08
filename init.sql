@@ -246,11 +246,11 @@ begin
 	        albums.artist_id = artists.artist_id'
             || case when $4 is not null then new_query else ' ' end ||  
 	        'group by artists.artist_id order by'
-            || case $3 when 'ascending' then format(' %s asc ',$2) when 'descending' then format(' %s desc ',$2) end || 
+            || case $3 when 'ascending' then format(' %s asc,artists.artist_id asc ',$2) when 'descending' then format(' %s desc,artists.artist_id desc ',$2) end || 
             format('limit 8 offset %s',new_offset) || ') as s'; 
 	else
 		return query execute
-		'select json_agg(json_build_object(''name'',name,''artist_id'',artist_id)order by name asc) as artists from artists;';			 
+		'select json_agg(json_build_object(''name'',name,''artist_id'',artist_id)order by name,artist_id asc) as artists from artists;';			 
 	end if;
 end
 $$ language plpgsql;
@@ -278,7 +278,7 @@ begin
     join artists on artists.artist_id = albums.artist_id'
     || case when $4 is not null then new_query else ' ' end || 
     'order by'
-    || case $3 when 'ascending' then format(' %s asc ',$2) when 'descending' then format(' %s desc ',$2) end || 
+    || case $3 when 'ascending' then format(' %s asc,albums.album_id asc ',$2) when 'descending' then format(' %s desc,albums.album_id desc ',$2) end || 
     format('limit 8 offset %s',new_offset); 
 end
 $$ language plpgsql;
